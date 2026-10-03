@@ -183,13 +183,45 @@ git diff --check
 
 ## Demo
 
-7개 장애 증거와 category/confidence를 재현하며 각 fixture의 예상 category를 assert합니다.
-실제 클러스터 연결이나 변경은 하지 않습니다. 기존 터미널 데모도 유지합니다.
+Pod 상태만으로 설명하기 어려운 장애를 로그 증거와 연결하고, 원인 후보와 추가 검토 항목을
+제시하는 두 대표 사례입니다. `examples.demo_incidents`는 7개 fixture의 장애 증거와
+category/confidence를 재현하며 각 fixture의 예상 category를 assert합니다.
+
+**fixture/mock 기반 오프라인 데모이며, 아래 `loki` 증거는 실제 Loki live query 결과가 아닙니다.**
+Kubernetes 상태와 로그 모두 fixture에서 로드하며 실제 클러스터 연결이나 변경은 하지 않습니다.
 
 ```bash
 .venv/bin/python -m examples.demo_incidents
 .venv/bin/python -m examples.mock_report
 ```
+
+아래는 실제 `examples.demo_incidents` 터미널 출력을 핵심 evidence 중심으로 축약한 예시입니다.
+타임스탬프와 반복 상태 필드는 생략했습니다. 기존 `examples.mock_report` 터미널 데모도 유지합니다.
+
+```text
+05_db_connection_refused | READ-ONLY
+[critical] demo/demo-app DEPENDENCY_CONNECTION_FAILURE (medium)
+  Confidence: CrashLoop과 DB 관련 refused 로그가 있으나 연결 대상의 실제 상태는 미확인입니다.
+  kubernetes state=waiting reason=CrashLoopBackOff ready=False
+  loki postgres database connection refused db.internal:5432
+  Review: DB/service DNS, endpoint, 네트워크 정책과 의존 서비스 상태를 읽기 전용으로 확인하세요.
+
+06_ingress_routing | READ-ONLY
+[warning] demo/demo-app INGRESS_OR_ROUTING (low)
+  Confidence: Running/ready와 routing 관련 5xx 로그만 확인했습니다. Service 상태와 원인 분리는 추가 조회가 필요합니다.
+  kubernetes phase=Running state=running ready=True
+  loki upstream gateway HTTP 502 routing failed
+  Review: Ingress/Service 대상과 endpoint, upstream 로그를 확인하세요. 애플리케이션 자체 오류도 배제하지 마세요.
+```
+
+첫 사례는 CrashLoop과 DB 연결 거부 로그를 연결해 의존 서비스 장애 후보를 제시합니다.
+두 번째는 Running/ready여도 요청 경로 장애 후보가 있을 수 있음을 보여주며, Service/Ingress를
+검증하지 않았으므로 low confidence를 유지합니다. 두 사례 모두 확정 진단이나 자동 복구가 아닌
+운영자의 추가 검토를 위한 결과입니다.
+
+검증 범위는 위 Testing 기록과 같습니다. Prometheus/Loki live endpoint와 실제 query는 미검증이며,
+실제 LLM/Discord 호출, Docker build, Helm install은 수행하지 않았습니다.
+실제 Kubernetes 검증은 read-only 조회 범위이며, **자동 복구(no auto-remediation)는 실행하지 않습니다.**
 
 ## Packaging
 

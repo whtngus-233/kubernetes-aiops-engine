@@ -1,0 +1,29 @@
+{
+  "namespace": "demo",
+  "pods": [
+    {
+      "name": "demo-app",
+      "phase": "Running",
+      "containers": [
+        {
+          "name": "app",
+          "kind": "regular",
+          "state": "waiting",
+          "restart_count": 0,
+          "ready": false,
+          "waiting_reason": "ImagePullBackOff"
+        }
+      ],
+      "events": [
+        {
+          "reason": "Failed",
+          "message": "Failed to pull image demo:missing",
+          "type": "Warning",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "evidence": [],
+  "expected_category": "IMAGE_PULL_FAILURE"
+}

@@ -1,0 +1,21 @@
+{
+  "namespace": "demo",
+  "pods": [
+    {
+      "name": "demo-app",
+      "phase": "Running",
+      "containers": [
+        {
+          "name": "app",
+          "kind": "regular",
+          "state": "waiting",
+          "restart_count": 0,
+          "ready": false,
+          "waiting_reason": "CrashLoopBackOff"
+        }
+      ]
+    }
+  ],
+  "evidence": [],
+  "expected_category": "CrashLoopBackOff"
+}

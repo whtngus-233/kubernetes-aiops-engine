@@ -1,0 +1,5 @@
+kubernetes==36.0.3
+PyYAML==6.0.3
+requests==2.34.2
+fastapi==0.142.2
+uvicorn==0.54.0

@@ -1,0 +1,37 @@
+{
+  "namespace": "demo",
+  "pods": [
+    {
+      "name": "demo-app",
+      "phase": "Running",
+      "containers": [
+        {
+          "name": "app",
+          "kind": "regular",
+          "state": "running",
+          "restart_count": 0,
+          "ready": true
+        }
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "source": "prometheus",
+      "pod": "demo-app",
+      "container": "app",
+      "evidence_type": "metric",
+      "key": "cpu_cores",
+      "value": 1.2
+    },
+    {
+      "source": "prometheus",
+      "pod": "demo-app",
+      "container": "app",
+      "evidence_type": "metric",
+      "key": "restart_increase",
+      "value": 0
+    }
+  ],
+  "expected_category": "HIGH_CPU"
+}

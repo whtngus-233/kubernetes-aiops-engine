@@ -1,0 +1,29 @@
+{
+  "namespace": "demo",
+  "pods": [
+    {
+      "name": "demo-app",
+      "phase": "Running",
+      "containers": [
+        {
+          "name": "app",
+          "kind": "regular",
+          "state": "running",
+          "restart_count": 0,
+          "ready": true
+        }
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "source": "loki",
+      "pod": "demo-app",
+      "container": "app",
+      "evidence_type": "log",
+      "key": "error_signal",
+      "message": "upstream gateway HTTP 502 routing failed"
+    }
+  ],
+  "expected_category": "INGRESS_OR_ROUTING"
+}

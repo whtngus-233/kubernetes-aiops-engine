@@ -1,0 +1,4 @@
+namespace: default
+restart_threshold: 5
+# context: your-kubeconfig-context
+# Prometheus/Loki/LLM/API 설정은 .env.example의 프로세스 환경변수를 사용합니다.

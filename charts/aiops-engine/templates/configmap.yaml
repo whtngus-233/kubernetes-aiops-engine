@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aiops.name" . }}
+data:
+  AIOPS_ALLOWED_NAMESPACES: {{ join "," (default (list .Release.Namespace) .Values.allowedNamespaces) | quote }}
+  AIOPS_CLUSTER: {{ .Values.clusterName | quote }}
+  PROMETHEUS_URL: {{ .Values.prometheusUrl | quote }}
+  LOKI_URL: {{ .Values.lokiUrl | quote }}
+  AIOPS_RESTART_THRESHOLD: {{ .Values.restartThreshold | quote }}
+  AIOPS_CPU_THRESHOLD: {{ .Values.cpuThreshold | quote }}
+  LOKI_MINUTES: {{ .Values.lokiMinutes | quote }}
+  LOKI_LINE_LIMIT: {{ .Values.lokiLineLimit | quote }}
+  AIOPS_LLM_ENABLED: {{ .Values.llmEnabled | quote }}
+  OPENAI_MODEL: {{ .Values.openaiModel | quote }}
+  AIOPS_NOTIFY_ENABLED: {{ .Values.notifyEnabled | quote }}

@@ -1,0 +1,29 @@
+# Example only. No chart installation is performed by this project.
+replicaCount: 1
+image:
+  repository: your-registry/aiops-engine
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+# Empty means release namespace. RBAC is scoped to each listed namespace.
+allowedNamespaces: []
+clusterName: your-cluster
+prometheusUrl: ""
+lokiUrl: ""
+restartThreshold: 5
+cpuThreshold: 0.8
+lokiMinutes: 15
+lokiLineLimit: 100
+llmEnabled: false
+openaiModel: ""
+notifyEnabled: false
+# Pre-existing Secret, managed separately. Chart contains no secret values.
+# Keys may include OPENAI_API_KEY, DISCORD_WEBHOOK_URL, AIOPS_API_TOKEN,
+# ALERTMANAGER_TOKEN. Runtime does not get Kubernetes secrets API permission.
+existingSecret: ""
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

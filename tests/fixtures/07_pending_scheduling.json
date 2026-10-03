@@ -1,0 +1,20 @@
+{
+  "namespace": "demo",
+  "pods": [
+    {
+      "name": "demo-app",
+      "phase": "Pending",
+      "containers": [],
+      "events": [
+        {
+          "reason": "FailedScheduling",
+          "message": "Insufficient cpu",
+          "type": "Warning",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "evidence": [],
+  "expected_category": "SCHEDULING_FAILURE"
+}

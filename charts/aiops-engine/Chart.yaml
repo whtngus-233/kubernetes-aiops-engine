@@ -1,0 +1,6 @@
+apiVersion: v2
+name: aiops-engine
+description: Read-only evidence-based Kubernetes incident analysis
+version: 1.0.0
+appVersion: "1.0.0"
+type: application

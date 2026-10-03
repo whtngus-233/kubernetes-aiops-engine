@@ -1,0 +1,183 @@
+# Kubernetes AIOps Incident Analysis Platform
+
+재사용 가능한 Python 3.12 기반 **증거 수집 및 장애 원인 추론 보조 플랫폼**입니다.
+기존 Kubernetes MVP를 유지하면서 Metrics/Logs correlation, LLM advisory, FastAPI, Discord와
+Docker/Helm 패키징을 확장했습니다. **클러스터 변경과 자동 복구는 실행하지 않습니다.**
+
+## Problem
+
+Kubernetes 장애를 조사할 때 사람이 Pod → Event → Metrics → Logs를 반복 조회해야 합니다.
+Running Pod도 의존 서비스, ingress/routing 또는 애플리케이션 오류로 사용자 요청을 처리하지 못할 수 있습니다.
+MODUI EKS 운영 경험에서 출발했지만 코드에 MODUI 서비스 이름이나 endpoint를 내장하지 않았습니다.
+
+## Goal
+
+시간과 workload identity가 있는 증거를 모아 관찰 사실과 원인 후보를 분리하고,
+운영자가 검토할 구조화 보고서와 추가 확인 방법을 제공합니다. 증거가 부족하면 원인을 확정하지 않습니다.
+
+## Architecture
+
+```text
+Kubernetes
+     │
+ ┌───┼─────────┐
+ │   │         │
+Events Metrics Logs
+ │   │         │
+ └───┼─────────┘
+     ↓
+Evidence Collector (Kubernetes / Prometheus / Loki)
+     ↓
+Normalized Evidence (source / timestamp / namespace / pod / container)
+     ↓
+Correlation Engine ← Rule Engine (기존 상태 탐지 유지)
+     ↓
+LLM Analyzer (optional, advisory, no tools)
+     ↓
+Structured Incident Report
+     ↓
+Terminal / JSON / Discord / FastAPI
+```
+
+## Features
+
+- Kubernetes: regular/init/ephemeral container, current/previous termination, readiness, memory limit,
+  Pod UID로 Event 연결, bounded pagination, timeout과 부분 실패 처리.
+- Prometheus: 5분 CPU rate, memory working set/limit, restart total/increase, waiting/terminated, phase/readiness.
+  각 query 실패를 분리하며 empty result를 장애로 해석하지 않습니다.
+- Loki: namespace/pod/container, label mapping, 장애 시점 주변 시간 범위, line/response 제한,
+  signal filtering → credential masking → snippet truncation. 원본 로그를 저장하지 않습니다.
+- Correlation: Pod/container 및 최근 20분 증거만 연결, high/medium/low와 판단 근거 제공.
+- LLM: provider abstraction, Responses API JSON schema 및 로컬 출력 검증, timeout/refusal 시 규칙 결과 유지.
+- Discord: 환경변수 webhook, 메시지 길이 제한, mention 차단, incident identity 기반 15분 dedup.
+- FastAPI: namespace allowlist, optional bearer authentication, 단일 동시 분석, bounded memory store.
+- Snapshot, 명시적 bounded scheduled interface, 인증된 Alertmanager webhook interface.
+
+## Safety Design
+
+Kubernetes API에서는 pods/events 조회만 합니다. Secret 값, Pod env, AWS credential,
+kubeconfig 내용은 수집하거나 출력하지 않습니다. memory limit만 Pod spec에서 선별합니다.
+Kubernetes SDK의 기존 인증 경로 또는 in-cluster ServiceAccount를 사용합니다.
+SDK의 EKS exec 인증은 기존 AWS 인증 플러그인 동작이며 API/LLM이 임의 명령을 받거나 실행하는 기능은 없습니다.
+수집·분석 코드에는 subprocess/shell 실행 경로, 변경 API, remediation 기능이 없습니다.
+
+로그/Event/LLM 출력은 마스킹하고 LLM에는 최대 40개 증거만 전달합니다.
+LLM 결과는 별도 `llm_analysis` 필드에 남기고 규칙 category/confidence를 덮어쓰지 않습니다.
+자동 마스킹은 모든 종류의 PII/secret을 보장하지 않으므로 외부 전송 정책 검토 후 활성화하세요.
+`automatic_action_taken`은 항상 false입니다. 실제 운영 장애 주입/부하 테스트는 하지 않았습니다.
+
+## Tech Stack
+
+Python 3.12 · Kubernetes Python Client · AWS EKS · Prometheus HTTP API · Loki HTTP API ·
+FastAPI · LLM (OpenAI optional) · Discord · unittest/pytest · Docker · Helm.
+DB와 observability 서버는 설치하지 않습니다.
+
+## Quick Start
+
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
+# 클러스터/네트워크/credential 불필요
+.venv/bin/python -m examples.demo_incidents
+.venv/bin/python -m examples.demo_incidents --format json
+
+# 기존 MVP CLI (default namespace, one snapshot)
+.venv/bin/python -m app.main --namespace your-namespace
+# 수집 → correlation → optional LLM/Discord
+.venv/bin/python -m app.main --namespace your-namespace --structured
+.venv/bin/python -m app.main --namespace your-namespace --format json
+# 명시적 저장만 허용, 기존 파일 overwrite 거부
+.venv/bin/python -m app.main --namespace your-namespace --format json --output /tmp/incident-report.json
+```
+
+기존 `--config config.example.yaml`, `--context`, `--restart-threshold`를 유지합니다.
+CLI 옵션이 YAML보다 우선하며 YAML은 `safe_load`와 키 검증을 사용합니다.
+기존 상태 RuleEngine의 category 이름과 테스트는 유지됩니다. `--structured`/JSON은 correlation category를 사용합니다.
+종료 코드: 0 분석 완료, 1 설정/Pod 조회 실패, 2 부분 증거 실패. 파일은 자동 저장하지 않습니다.
+
+`.env.example`에는 변수 이름과 안전한 기본값만 있습니다. 프로그램은 `.env`를 자동 로딩하지 않습니다.
+프로세스 환경 또는 운영 Secret 관리 도구로 전달하세요. API key와 webhook은 환경변수만 읽습니다.
+`PROMETHEUS_URL`, `LOKI_URL`이 없으면 수집기는 비활성화됩니다.
+LLM은 `AIOPS_LLM_ENABLED=true`, `OPENAI_MODEL`, `OPENAI_API_KEY`가 모두 필요합니다.
+알림은 `AIOPS_NOTIFY_ENABLED=true`와 `DISCORD_WEBHOOK_URL`이 필요합니다.
+
+## API
+
+```bash
+AIOPS_ALLOWED_NAMESPACES=your-namespace .venv/bin/uvicorn app.api:app --host 127.0.0.1 --port 8000 --workers 1
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/api/analyze -H 'Content-Type: application/json' -d '{"namespace":"your-namespace"}'
+curl http://127.0.0.1:8000/api/incidents
+```
+
+`GET /api/incidents/{incident_id}`로 UUID 보고서를 조회합니다. `GET /health`는 로컬 liveness이며
+Kubernetes/Prometheus/Loki 연결 성공을 보장하지 않습니다.
+`AIOPS_API_TOKEN` 설정 시 `/api/*` 조회·분석에 bearer 인증을 요구합니다.
+토큰 미설정은 로컬 개발 전용입니다. 외부 공개 전 인증/TLS/network 제한이 필요합니다.
+API는 command, endpoint, path, kubeconfig 입력을 받지 않으며 추가 필드를 거부합니다.
+최대 1,000개 incident를 메모리에 유지하며 재시작 시 사라집니다. 한 worker/replica를 사용합니다.
+
+`POST /api/webhooks/alertmanager`는 `ALERTMANAGER_TOKEN` 설정 시에만 활성화되며
+`X-Alertmanager-Token`과 최대 20개의 firing alerts에서 namespace만 검증해 새 증거를 수집합니다.
+전달된 annotations를 사실/명령으로 사용하지 않습니다. 실제 Alertmanager 설정은 변경하지 않았습니다.
+`app.scheduling.scheduled_analysis`는 iterations 1–1000, interval 최소 30초의 명시적 interface이며
+프로그램 시작 시 schedule/무한 루프를 실행하지 않습니다.
+
+## Incident Scenarios
+
+| Fixture | Expected category | Evidence |
+|---|---|---|
+| 01_crashloop | CrashLoopBackOff | 반복 종료 상태, 추가 원인 증거 부족 |
+| 02_imagepull | IMAGE_PULL_FAILURE | image pull 상태 + Event |
+| 03_oom | MEMORY_PRESSURE | OOM + 메모리 한도 90% 이상 |
+| 04_high_cpu | HIGH_CPU | CPU rate + restart increase=0 |
+| 05_db_connection_refused | DEPENDENCY_CONNECTION_FAILURE | CrashLoop + DB refused 로그 |
+| 06_ingress_routing | INGRESS_OR_ROUTING | Running/ready + routing 5xx 로그, low confidence |
+| 07_pending_scheduling | SCHEDULING_FAILURE | Pending + FailedScheduling |
+
+추가로 HISTORICAL_RESTART_WARNING, Failed, Error, ErrImagePull, HighRestartCount를 지원합니다.
+Ingress 후보는 실제 Service/Ingress 정상 상태를 검증한 확정 진단이 아닙니다.
+현재 memory는 instant sample이므로 증가 추이나 OOM 발생 직전 peak를 주장하지 않습니다.
+HIGH_CPU 임계값은 cores(기본 0.8)이며 CPU limit 대비 백분율이 아닙니다.
+
+## Testing
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pytest -q
+.venv/bin/python -m compileall -q app tests examples scripts
+.venv/bin/python -m pip check
+.venv/bin/python scripts/security_scan.py
+helm lint charts/aiops-engine
+helm template demo charts/aiops-engine --namespace aiops
+# untracked 파일도 별도 확인 필요
+ git diff --check
+```
+
+테스트는 외부 수집과 LLM/Discord를 mock 처리합니다. FastAPI는 로컬 TestClient로 검증합니다.
+실제 EKS 검증과 외부 연동 미검증 범위는 [검증 기록](docs/validation.md)에 분리했습니다.
+
+## Demo
+
+`python -m examples.demo_incidents` 한 명령으로 7개 장애 증거와 category/confidence를 재현합니다.
+각 fixture의 예상 category를 assert하며 실제 클러스터 연결이나 변경은 하지 않습니다.
+기존 `python -m examples.mock_report`도 유지합니다.
+
+## Packaging
+
+Python slim/non-root Dockerfile, healthcheck, allowlist Docker context를 제공합니다.
+[Helm chart](charts/aiops-engine/README.md)는 Deployment/Service/ConfigMap/ServiceAccount와
+namespace별 pods/events get/list Role/RoleBinding, probes/resources, hardened securityContext를 포함합니다.
+Secret 자체, AWS 권한, ClusterRole은 포함하지 않습니다. **Docker build와 Helm install은 실행하지 않았습니다.**
+
+## Documentation
+
+[Architecture](docs/architecture.md) · [ADR](docs/adr/001-read-only-design.md) ·
+[Configuration and integration](docs/integration.md) · [Security](docs/security.md) ·
+[Portfolio](docs/portfolio.md) · [Interview](docs/interview.md) · [Validation](docs/validation.md)
+
+## Future Work
+
+memory/restart time-series, Pod UID와 metric/log identity 강화, Service/Ingress read-only evidence,
+backend 인증/tenant 지원, shared persistent incident store, distributed dedup/cooldown,
+지속 감시 queue/rate limits, ground-truth 기반 rule/LLM evaluation을 우선합니다.
+자동복구는 별도의 정책·승인·감사 설계 전에는 추가하지 않습니다.

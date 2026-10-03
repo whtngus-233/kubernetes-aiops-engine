@@ -1,0 +1,38 @@
+{
+  "namespace": "demo",
+  "pods": [
+    {
+      "name": "demo-app",
+      "phase": "Running",
+      "containers": [
+        {
+          "name": "app",
+          "kind": "regular",
+          "state": "terminated",
+          "restart_count": 0,
+          "ready": false,
+          "terminated_reason": "OOMKilled"
+        }
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "source": "prometheus",
+      "pod": "demo-app",
+      "container": "app",
+      "evidence_type": "metric",
+      "key": "memory_bytes",
+      "value": 95000000
+    },
+    {
+      "source": "prometheus",
+      "pod": "demo-app",
+      "container": "app",
+      "evidence_type": "metric",
+      "key": "memory_limit_bytes",
+      "value": 100000000
+    }
+  ],
+  "expected_category": "MEMORY_PRESSURE"
+}

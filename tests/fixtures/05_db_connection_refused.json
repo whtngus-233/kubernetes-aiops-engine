@@ -1,0 +1,30 @@
+{
+  "namespace": "demo",
+  "pods": [
+    {
+      "name": "demo-app",
+      "phase": "Running",
+      "containers": [
+        {
+          "name": "app",
+          "kind": "regular",
+          "state": "waiting",
+          "restart_count": 0,
+          "ready": false,
+          "waiting_reason": "CrashLoopBackOff"
+        }
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "source": "loki",
+      "pod": "demo-app",
+      "container": "app",
+      "evidence_type": "log",
+      "key": "error_signal",
+      "message": "postgres database connection refused db.internal:5432"
+    }
+  ],
+  "expected_category": "DEPENDENCY_CONNECTION_FAILURE"
+}

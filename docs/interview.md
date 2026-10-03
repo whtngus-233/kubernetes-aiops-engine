@@ -51,7 +51,7 @@ OOM 종료와 memory working set/limit near 90%를 조합해 memory pressure를 
 ## 실제 EKS에서 어떻게 검증했나요?
 
 기존 context 이름만 확인하고 pods/events와 관측 리소스를 READ-ONLY로 조회했다.
-확장 Python Collector snapshot은 성공했고 11개 Running Pod 조회를 확인했다.
+이전 검증 기록에서 확장 Python Collector snapshot은 성공했고 11개 Running Pod 조회를 확인했다.
 일부 API는 timeout되어 외부 observability 연동은 미확인으로 기록했다. 실제 운영 장애 주입은 하지 않았다.
 
 ## 보안은 어떻게 고려했나요?

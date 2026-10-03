@@ -4,13 +4,16 @@ Python 3.12 기반 **Kubernetes 장애 증거 수집 및 원인 추론 보조 �
 Pod 상태, Event, Metrics, Logs를 시간과 workload identity로 연결해 운영자가 검토할
 구조화 보고서와 추가 확인 방법을 제공합니다. **클러스터 변경과 자동 복구는 실행하지 않습니다.**
 
+## 문제와 목적
+
 Kubernetes 장애 조사에서 반복되는 Pod → Event → Metrics → Logs 조회를 줄이는 것이 목적입니다.
 Running Pod도 의존 서비스, ingress/routing 또는 애플리케이션 오류로 사용자 요청을 처리하지 못할 수 있어,
 관찰 사실과 원인 후보를 분리합니다. **증거가 부족하면 원인을 확정하지 않습니다.**
 
 MODUI EKS 운영 경험에서 출발했으며, 코드에 MODUI 서비스 이름이나 endpoint를 내장하지 않았습니다.
-기존 Kubernetes MVP의 상태 탐지를 유지하면서 Metrics/Logs correlation, LLM advisory,
-FastAPI, Discord 및 Docker/Helm 패키징을 확장했습니다.
+현재 핵심은 **Rule/Correlation 기반 분석**입니다. LLM은 optional advisory이며,
+FastAPI·외부 수집기·Discord adapter와 Docker/Helm 패키징 파일을 제공합니다.
+구현된 interface와 실제 운영 연동 검증은 구분합니다.
 
 ## Architecture
 
@@ -42,7 +45,7 @@ Terminal / JSON / Discord / FastAPI
 |---|---|
 | Kubernetes 증거 수집 | regular/init/ephemeral container, current/previous termination, readiness, memory limit 수집. Pod UID로 Event 연결, bounded pagination, timeout과 부분 실패 처리 |
 | Prometheus Metrics | 5분 CPU rate, memory working set/limit, restart total/increase, waiting/terminated, phase/readiness. query별 실패를 분리하고 empty result를 장애로 해석하지 않음 |
-| Loki Logs | namespace/pod/container 및 label mapping, 장애 시점 주변 시간 범위, line/response 제한. signal filtering → credential masking → snippet truncation 적용, 원본 로그 미저장 |
+| Loki Logs | namespace/pod/container 및 label mapping, 기본 최근 15분; collector에 incident_time을 명시하면 사건 전후 범위, line/response 제한. signal filtering → credential masking → snippet truncation 적용, 원본 로그 미저장 |
 | 증거 상관 분석 | Pod/container 및 최근 20분 증거만 연결. high/medium/low confidence와 판단 근거 제공 |
 | 선택적 LLM 분석 | provider abstraction, Responses API JSON schema 및 로컬 출력 검증. timeout/refusal 시 규칙 결과 유지 |
 | Discord 알림 | 환경변수 webhook, 메시지 길이 제한, mention 차단, incident identity 기반 15분 dedup |
@@ -61,6 +64,99 @@ SDK의 EKS exec 인증은 기존 AWS 인증 플러그인 동작이며 API/LLM이
 LLM 결과는 별도 `llm_analysis` 필드에 남기고 규칙 category/confidence를 덮어쓰지 않습니다.
 자동 마스킹은 모든 종류의 PII/secret을 보장하지 않으므로 외부 전송 정책 검토 후 활성화하세요.
 `automatic_action_taken`은 항상 false입니다. 실제 운영 장애 주입/부하 테스트는 하지 않았습니다.
+
+## Demo
+
+Pod 상태만으로 설명하기 어려운 장애를 로그 증거와 연결하고, 원인 후보와 추가 검토 항목을
+제시하는 두 대표 사례입니다. `examples.demo_incidents`는 7개 fixture의 장애 증거와
+category/confidence를 재현하며 각 fixture의 예상 category 포함 여부를 검사합니다.
+
+**fixture/mock 기반 오프라인 데모이며, 아래 `loki` 증거는 실제 Loki live query 결과가 아닙니다.**
+Kubernetes 상태와 로그 모두 fixture에서 로드하며 실제 클러스터 연결이나 변경은 하지 않습니다.
+
+```bash
+.venv/bin/python -m examples.demo_incidents
+.venv/bin/python -m examples.demo_incidents --format json
+```
+
+아래는 실제 `examples.demo_incidents` 터미널 출력을 핵심 evidence 중심으로 축약한 예시입니다.
+타임스탬프, summary와 일부 상태 필드는 생략했습니다. 표시한 필드와 문구는 실행 결과와 같습니다.
+
+```text
+05_db_connection_refused: Kubernetes AIOps Incident Report | READ-ONLY
+[critical] demo/demo-app DEPENDENCY_CONNECTION_FAILURE (medium)
+  Confidence: CrashLoop과 DB 관련 refused 로그가 있으나 연결 대상의 실제 상태는 미확인입니다.
+  loki error_signal=None postgres database connection refused db.internal:5432
+  kubernetes state=waiting
+  kubernetes reason=CrashLoopBackOff
+  kubernetes ready=False
+  Review: DB/service DNS, endpoint, 네트워크 정책과 의존 서비스 상태를 읽기 전용으로 확인하세요.
+
+06_ingress_routing: Kubernetes AIOps Incident Report | READ-ONLY
+[warning] demo/demo-app INGRESS_OR_ROUTING (low)
+  Confidence: Running/ready와 routing 관련 5xx 로그만 확인했습니다. Service 상태와 원인 분리는 추가 조회가 필요합니다.
+  loki error_signal=None upstream gateway HTTP 502 routing failed
+  kubernetes phase=Running
+  kubernetes state=running
+  kubernetes ready=True
+  Review: Ingress/Service 대상과 endpoint, upstream 로그를 확인하세요. 애플리케이션 자체 오류도 배제하지 마세요.
+```
+
+첫 사례는 CrashLoop과 DB 연결 거부 로그를 연결해 의존 서비스 장애 후보를 제시합니다.
+두 번째는 Running/ready여도 요청 경로 장애 후보가 있을 수 있음을 보여주며, Service/Ingress를
+검증하지 않았으므로 low confidence를 유지합니다. 두 사례 모두 확정 진단이나 자동 복구가 아닌
+운영자의 추가 검토를 위한 결과입니다.
+
+검증 범위는 아래 Testing / Validation 기록과 같습니다. Prometheus/Loki live endpoint와 실제 query는 미검증이며,
+실제 LLM/Discord 호출, Docker build, Helm install은 수행하지 않았습니다.
+이전 실제 Kubernetes 검증은 read-only 조회 범위이며, **자동 복구(no auto-remediation)는 실행하지 않습니다.**
+
+### Fixture categories
+
+| Fixture | Expected category | Evidence |
+|---|---|---|
+| 01_crashloop | CrashLoopBackOff | 반복 종료 상태, 추가 원인 증거 부족 |
+| 02_imagepull | IMAGE_PULL_FAILURE | image pull 상태 + Event |
+| 03_oom | MEMORY_PRESSURE | OOM + 메모리 한도 90% 이상 |
+| 04_high_cpu | HIGH_CPU | CPU rate + restart increase=0 |
+| 05_db_connection_refused | DEPENDENCY_CONNECTION_FAILURE | CrashLoop + DB refused 로그 |
+| 06_ingress_routing | INGRESS_OR_ROUTING | Running/ready + routing 5xx 로그, low confidence |
+| 07_pending_scheduling | SCHEDULING_FAILURE | Pending + FailedScheduling |
+
+추가로 HISTORICAL_RESTART_WARNING, Failed, Error, ErrImagePull, HighRestartCount를 지원합니다.
+Ingress 후보는 실제 Service/Ingress 정상 상태를 검증한 확정 진단이 아닙니다.
+현재 memory는 instant sample이므로 증가 추이나 OOM 발생 직전 peak를 주장하지 않습니다.
+HIGH_CPU 임계값은 cores(기본 0.8)이며 CPU limit 대비 백분율이 아닙니다.
+
+## Testing / Validation
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pytest -q
+.venv/bin/python -m compileall -q app tests examples scripts
+.venv/bin/python -m pip check
+.venv/bin/python scripts/security_scan.py
+helm lint charts/aiops-engine
+helm template demo charts/aiops-engine --namespace aiops
+git diff --check
+```
+
+테스트는 외부 수집과 LLM/Discord를 mock 처리합니다. FastAPI는 로컬 TestClient로 검증합니다.
+아래는 [검증 기록](docs/validation.md)에 남긴 범위이며, 실제 연동 전체의 성공을 의미하지 않습니다.
+
+| 범위 | 검증 결과와 한계 |
+|---|---|
+| 로컬 테스트 | 이번 전체 unittest/pytest는 180초 timeout으로 완료 미확인. API 제외 pytest는 59개와 subtest 31개 통과. 이전 전체 69개 통과 기록과 이번 결과는 구분 |
+| 실제 EKS 조회 | 이전 read-only 검증 기록에서 11개 Pod가 Running으로 조회됐고 structured CLI가 exit 0으로 완료. 이번 정리 작업에서는 클러스터를 다시 조회하지 않음. 경고 없는 snapshot이며 서비스 전체 정상 판정은 아님. 일부 조회는 timeout으로 실패 |
+| 외부 연동 | 실제 Prometheus/Loki query, 외부 LLM 호출, Discord 전송은 수행하지 않음. Prometheus/Loki 설치 여부도 미확인 |
+| 배포·운영 | API 운영 배포·공개, Docker build, Helm install, 실제 장애 주입·부하 테스트는 수행하지 않음. Helm lint/template 및 정적 검사는 수행 |
+
+## Packaging
+
+Python slim/non-root Dockerfile, healthcheck, allowlist Docker context를 제공합니다.
+[Helm chart](charts/aiops-engine/README.md)는 Deployment/Service/ConfigMap/ServiceAccount와
+namespace별 pods/events get/list Role/RoleBinding, probes/resources, hardened securityContext를 포함합니다.
+Secret 자체, AWS 권한, ClusterRole은 포함하지 않습니다. **Docker build와 Helm install은 실행하지 않았습니다.**
 
 ## Tech Stack
 
@@ -139,96 +235,6 @@ API는 command, endpoint, path, kubeconfig 입력을 받지 않으며 추가 필
 전달된 annotations를 사실/명령으로 사용하지 않습니다. 실제 Alertmanager 설정은 변경하지 않았습니다.
 `app.scheduling.scheduled_analysis`는 iterations 1–1000, interval 최소 30초의 명시적 interface이며
 프로그램 시작 시 schedule/무한 루프를 실행하지 않습니다.
-
-## Incident Scenarios
-
-| Fixture | Expected category | Evidence |
-|---|---|---|
-| 01_crashloop | CrashLoopBackOff | 반복 종료 상태, 추가 원인 증거 부족 |
-| 02_imagepull | IMAGE_PULL_FAILURE | image pull 상태 + Event |
-| 03_oom | MEMORY_PRESSURE | OOM + 메모리 한도 90% 이상 |
-| 04_high_cpu | HIGH_CPU | CPU rate + restart increase=0 |
-| 05_db_connection_refused | DEPENDENCY_CONNECTION_FAILURE | CrashLoop + DB refused 로그 |
-| 06_ingress_routing | INGRESS_OR_ROUTING | Running/ready + routing 5xx 로그, low confidence |
-| 07_pending_scheduling | SCHEDULING_FAILURE | Pending + FailedScheduling |
-
-추가로 HISTORICAL_RESTART_WARNING, Failed, Error, ErrImagePull, HighRestartCount를 지원합니다.
-Ingress 후보는 실제 Service/Ingress 정상 상태를 검증한 확정 진단이 아닙니다.
-현재 memory는 instant sample이므로 증가 추이나 OOM 발생 직전 peak를 주장하지 않습니다.
-HIGH_CPU 임계값은 cores(기본 0.8)이며 CPU limit 대비 백분율이 아닙니다.
-
-## Testing
-
-```bash
-.venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m pytest -q
-.venv/bin/python -m compileall -q app tests examples scripts
-.venv/bin/python -m pip check
-.venv/bin/python scripts/security_scan.py
-helm lint charts/aiops-engine
-helm template demo charts/aiops-engine --namespace aiops
-# untracked 파일도 별도 확인 필요
-git diff --check
-```
-
-테스트는 외부 수집과 LLM/Discord를 mock 처리합니다. FastAPI는 로컬 TestClient로 검증합니다.
-아래는 [검증 기록](docs/validation.md)에 남긴 범위이며, 실제 연동 전체의 성공을 의미하지 않습니다.
-
-| 범위 | 검증 결과와 한계 |
-|---|---|
-| 로컬 테스트 | unittest 69개 통과, pytest 69개 및 subtest 31개 통과. TestClient deprecation warning과 sandbox 대기·timeout 이력은 검증 기록에 명시 |
-| 실제 EKS 조회 | 11개 Pod가 Running으로 조회됐고 structured CLI가 exit 0으로 완료. 경고 없는 snapshot이며 서비스 전체 정상 판정은 아님. 일부 조회는 timeout으로 실패 |
-| 외부 연동 | 실제 Prometheus/Loki query, 외부 LLM 호출, Discord 전송은 수행하지 않음. Prometheus/Loki 설치 여부도 미확인 |
-| 배포·운영 | API 운영 배포·공개, Docker build, Helm install, 실제 장애 주입·부하 테스트는 수행하지 않음. Helm lint/template 및 정적 검사는 수행 |
-
-## Demo
-
-Pod 상태만으로 설명하기 어려운 장애를 로그 증거와 연결하고, 원인 후보와 추가 검토 항목을
-제시하는 두 대표 사례입니다. `examples.demo_incidents`는 7개 fixture의 장애 증거와
-category/confidence를 재현하며 각 fixture의 예상 category를 assert합니다.
-
-**fixture/mock 기반 오프라인 데모이며, 아래 `loki` 증거는 실제 Loki live query 결과가 아닙니다.**
-Kubernetes 상태와 로그 모두 fixture에서 로드하며 실제 클러스터 연결이나 변경은 하지 않습니다.
-
-```bash
-.venv/bin/python -m examples.demo_incidents
-.venv/bin/python -m examples.mock_report
-```
-
-아래는 실제 `examples.demo_incidents` 터미널 출력을 핵심 evidence 중심으로 축약한 예시입니다.
-타임스탬프와 반복 상태 필드는 생략했습니다. 기존 `examples.mock_report` 터미널 데모도 유지합니다.
-
-```text
-05_db_connection_refused | READ-ONLY
-[critical] demo/demo-app DEPENDENCY_CONNECTION_FAILURE (medium)
-  Confidence: CrashLoop과 DB 관련 refused 로그가 있으나 연결 대상의 실제 상태는 미확인입니다.
-  kubernetes state=waiting reason=CrashLoopBackOff ready=False
-  loki postgres database connection refused db.internal:5432
-  Review: DB/service DNS, endpoint, 네트워크 정책과 의존 서비스 상태를 읽기 전용으로 확인하세요.
-
-06_ingress_routing | READ-ONLY
-[warning] demo/demo-app INGRESS_OR_ROUTING (low)
-  Confidence: Running/ready와 routing 관련 5xx 로그만 확인했습니다. Service 상태와 원인 분리는 추가 조회가 필요합니다.
-  kubernetes phase=Running state=running ready=True
-  loki upstream gateway HTTP 502 routing failed
-  Review: Ingress/Service 대상과 endpoint, upstream 로그를 확인하세요. 애플리케이션 자체 오류도 배제하지 마세요.
-```
-
-첫 사례는 CrashLoop과 DB 연결 거부 로그를 연결해 의존 서비스 장애 후보를 제시합니다.
-두 번째는 Running/ready여도 요청 경로 장애 후보가 있을 수 있음을 보여주며, Service/Ingress를
-검증하지 않았으므로 low confidence를 유지합니다. 두 사례 모두 확정 진단이나 자동 복구가 아닌
-운영자의 추가 검토를 위한 결과입니다.
-
-검증 범위는 위 Testing 기록과 같습니다. Prometheus/Loki live endpoint와 실제 query는 미검증이며,
-실제 LLM/Discord 호출, Docker build, Helm install은 수행하지 않았습니다.
-실제 Kubernetes 검증은 read-only 조회 범위이며, **자동 복구(no auto-remediation)는 실행하지 않습니다.**
-
-## Packaging
-
-Python slim/non-root Dockerfile, healthcheck, allowlist Docker context를 제공합니다.
-[Helm chart](charts/aiops-engine/README.md)는 Deployment/Service/ConfigMap/ServiceAccount와
-namespace별 pods/events get/list Role/RoleBinding, probes/resources, hardened securityContext를 포함합니다.
-Secret 자체, AWS 권한, ClusterRole은 포함하지 않습니다. **Docker build와 Helm install은 실행하지 않았습니다.**
 
 ## Documentation
 

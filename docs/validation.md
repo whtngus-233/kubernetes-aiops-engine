@@ -1,4 +1,54 @@
-# Validation record — 2026-10-03 UTC
+# Validation record — portfolio finalization, 2026-10-03 UTC
+
+이번 작업은 README/docs 정확성 개선만 수행했다. 시작 시 working tree는 clean이고 HEAD는
+`b3b0f78`이었다. 구현·테스트·fixture는 변경하지 않았다. 아래의 이전 확장 검증 기록은
+기존 문서에 남아 있던 이력이며 이번 실행에서 재확인한 운영 결과가 아니다.
+
+## Current local validation
+
+기존 `.venv/bin/python`으로 실행했다. 전체 테스트에는 무한 대기를 막기 위해 `timeout 180`을 적용했다.
+
+| 명령 | 이번 결과 |
+|---|---|
+| `.venv/bin/python -m compileall -q app tests examples scripts` | 성공 (exit 0) |
+| `.venv/bin/python -m examples.demo_incidents` | 성공, 7개 expected category 일치 |
+| `.venv/bin/python -m examples.demo_incidents --format json` | 성공, 7개 expected category 일치 |
+| `.venv/bin/python -m unittest discover -s tests -v` | 180초 timeout (exit 124); 기존 14개 통과 후 첫 API 테스트에서 대기, 전체 통과 미확인 |
+| `.venv/bin/python -m pytest -q` | 180초 timeout (exit 124); 진행 출력만 있고 최종 결과 없음, 전체 통과 미확인 |
+| `.venv/bin/python -m pip check` | 성공, No broken requirements found |
+| `.venv/bin/python scripts/security_scan.py` | 성공, 65 source files; heuristic 검사 |
+| `helm lint charts/aiops-engine` | 성공, 1 chart linted / 0 failed; icon 권장 INFO |
+| `helm template demo charts/aiops-engine --namespace aiops` | 성공 (exit 0); 로컬 렌더링만 수행 |
+| `git diff --check` | 성공; 최종 문서 변경 후 다시 확인 |
+
+`scheduling.py`의 iterations 범위는 README와 동일한 1–1000, interval 최소 30초다.
+Demo는 fixture를 로드하고 실행 시 timestamp/UUID를 생성한다. README의 두 대표 사례는 실제
+터미널 출력에서 timestamp/summary/일부 상태 필드만 생략했다. 수치는 성능·정확도 평가가 아니다.
+
+## Current test limitations
+
+추가로 `.venv/bin/python -m pytest -q tests/test_engine.py tests/test_platform.py -k 'not APITests'`는
+**59 passed, 10 deselected, 31 subtests passed**, 34.40초, warning 1개로 완료했다.
+이 결과는 API 테스트 10개를 검증한 결과가 아니다. Starlette TestClient의 httpx deprecation warning이 있다.
+
+전체 unittest는 `APITests.test_analyze_and_retrieve`에서 대기했고 pytest도 완료되지 않았다.
+기존 validation 기록에 같은 TestClient 대기 이력이 있으나 이번 timeout의 근본 원인은 확정하지 못했다.
+단일 API 테스트에 `faulthandler.dump_traceback_later(10)`과 `timeout 30`을 적용한 진단 프로세스는
+Pydantic schema 생성 중 부분 stack만 출력하고 segmentation fault (exit 139)로 종료했다.
+이 진단은 테스트 통과나 앱 회귀의 증거로 사용하지 않는다. 코드/의존성을 바꾸거나 sandbox를 우회하지 않았다.
+실제 코드 회귀를 확인하지 못했으므로 코드 수정 없이 문서에 미완료 검증을 명시했다.
+
+## Current operational scope
+
+이번에는 Kubernetes를 다시 조회하지 않았고 변경하지 않았다. 아래 11개 Running Pod와 CLI exit 0은
+이전 read-only 검증 기록이다. 현재 운영 상태나 서비스 전체 정상 여부를 보장하지 않는다.
+Prometheus/Loki live query, 실제 OpenAI/LLM 및 Discord 호출은 새로 수행하지 않았다.
+Docker build, Helm install, 실제 장애 주입·부하 테스트와 운영 배포는 수행하지 않았다.
+패키지 설치, 인증 변경, sandbox 우회도 수행하지 않았다. 자동복구 기능은 없다.
+
+---
+
+# Previous expansion validation record — 2026-10-03 UTC
 
 ## Audit and scope
 

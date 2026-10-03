@@ -1,5 +1,6 @@
 # Project audit — 2026-10-03
 
+이 문서는 초기 확장 작업의 이력입니다. 현재 최종 정리 작업의 상태와 검증은 [validation.md](validation.md)를 참고하세요.
 작업 시작 시 전체 프로젝트 소스는 Git untracked 상태였습니다. 기존 코드는 삭제하지 않고 확장했습니다.
 기본 14개 unittest가 통과했고 Python 3.12 virtualenv에 Kubernetes 36.0.3/PyYAML 6.0.3이 있었습니다.
 

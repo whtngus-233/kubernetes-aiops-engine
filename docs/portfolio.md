@@ -12,11 +12,11 @@ Reusable Kubernetes AIOps Incident Analysis Engine을 설계했다.
 Pod/Container/Event 상태, Prometheus CPU rate·메모리·restart, Loki sanitized signal을 공통 모델로 연결하고
 Rule Engine과 시간/identity correlation으로 원인 후보를 설명한다. LLM-assisted RCA는 도구 권한 없이
 보조 JSON만 제공하며 human-in-the-loop으로 운영 결정을 남긴다.
-Discord 알림/dedup, FastAPI namespace allowlist/incident store, Docker/Helm 최소 RBAC로 재사용 경계를 완성했다.
+Discord 알림/dedup, FastAPI namespace allowlist/incident store, Docker/Helm 최소 RBAC로 재사용을 위한 interface와 패키징 예제를 제공했다.
 
 ## 검증과 정직한 범위
 
-이번 확장 작업에서 실제 modui-prod를 READ-ONLY로 조회한 Python Collector가 성공했다.
+이전 확장 작업의 검증 기록에서 실제 modui-prod를 READ-ONLY로 조회한 Python Collector가 성공했다.
 Pod 조회에서도 11개가 Running으로 확인됐다. 관측 API 일부 조회는 timeout되어
 Prometheus/Loki live integration은 확인하지 못했다. Grafana proxy 이름만으로 backend 존재를 주장하지 않는다.
 운영 서비스에는 장애를 주입하지 않았으며 offline mock fault scenarios 7개와 회귀 테스트로 검증했다.

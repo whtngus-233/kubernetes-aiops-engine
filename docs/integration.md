@@ -57,4 +57,5 @@ Ingress-level rate/body limits가 추가로 필요합니다. memory store는 100
 
 Alertmanager endpoint는 토큰이 없으면 disabled입니다. firing namespace만 사용하고 새 snapshot을 분석합니다.
 실제 Alertmanager 설정은 수정하지 않았습니다. 외부 scheduler는 `scheduled_analysis`를 명시적으로 호출하며
+iterations는 1–1000, interval_seconds는 최소 30초입니다. 기본은 1회/60초이며 import나 API 시작 시 자동 실행하지 않습니다.
 운영 무한 루프는 실행하지 않았습니다.

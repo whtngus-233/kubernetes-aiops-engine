@@ -6,7 +6,7 @@
 
 - models: workload/status/event 및 공통 IncidentEvidence, MetricsEvidence/LogEvidence/KubernetesEvidence.
 - HTTPTransport: response size limit, timeout, redirect 거부, 환경 proxy credentials 비활성화.
-- Evidence: namespace/pod/container equality, 20분 freshness window. Pod Event는 UID로 연결됩니다.
+- Evidence: namespace/pod/container 경계 (container 없는 Kubernetes 증거는 공유), 기본 최근 20분과 최대 1분 미래 timestamp 허용. Pod Event는 UID로 연결됩니다.
 - Rule/Correlation: 분류와 증거/원인 가설 분리, 설명 가능한 qualitative confidence.
 - Structured report: UUID ID와 별도의 stable workload/category dedup hash.
 - LLM: JSON schema + local validation; 장애/불완전 응답은 advisory unavailable로 처리.

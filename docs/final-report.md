@@ -31,7 +31,7 @@ terminal/JSON/explicit file output, LLM provider abstraction/strict output/no to
 Discord env-only webhook/dedup, FastAPI allowlist/auth/memory store/concurrency guard,
 bounded scheduling/Alertmanager interface, Docker/Helm examples, ADR/portfolio/interview 문서.
 
-## 3. 구현하지 못한 기능과 이유
+## 3. 미검증 연동과 후속 기능
 
 실제 Prometheus/Loki 안전 endpoint를 확인하지 못해 live query는 미검증이다.
 실제 LLM/Discord 호출은 수행하지 않고 mock으로 검증했다.
@@ -39,7 +39,7 @@ memory growth/peak time-series, Service/Ingress topology evidence, metric/log Po
 backend bearer/tenant/API proxy transport와 persistent/distributed store는 후속 개선이다.
 자동 복구는 안전 설계에 따라 의도적으로 제공하지 않는다.
 
-## 4. Kubernetes 실제 검증
+## 4. Kubernetes 실제 검증 (이전 기록)
 
 확장 Python Collector READ-ONLY CLI exit 0, rule findings 없음.
 별도 Pod 조회에서 modui-prod 11개 Running 확인. 전체 서비스 건강을 의미하지 않는다.
@@ -70,8 +70,10 @@ collector error/concurrency 429와 webhook scope/auth 검증. local mock TestCli
 
 ## 10. 테스트
 
-기존 14개 포함 69개 unittest 통과. pytest도 69 passed / 31 subtests passed. TestClient deprecation warning 1개는 validation.md에 기록했다.
-Python compile, pip check, 7개 fault demo와 기존 demo 성공.
+이전 확장 기록에서는 기존 14개 포함 unittest 69개와 pytest 69개 / subtests 31개가 통과했다.
+이번 전체 unittest/pytest는 180초 timeout으로 완료되지 않았다. API 제외 pytest는 59개와 subtests 31개가 통과했다.
+대기와 진단 실패의 상세 한계는 [validation.md](validation.md)에 기록한다.
+이번 Python compile, pip check, 7개 fixture의 terminal/JSON Demo는 성공했다.
 
 ## 11. Security
 
@@ -82,7 +84,8 @@ heuristic masking과 dependency compatibility check는 PII/vulnerability 전수 
 ## 12. Docker/Helm 준비 상태
 
 Dockerfile/non-root/healthcheck/context allowlist 작성. Docker build 미실행.
-Chart lint와 default/multiple namespace render/static RBAC 검증 성공. 실제 설치 없음.
+이번 chart lint와 `helm template demo charts/aiops-engine --namespace aiops`는 성공했다.
+multiple namespace render/static RBAC 검사는 이전 기록이다. 실제 설치 없음.
 
 ## 13. 실제 배포 전 작업
 
@@ -108,5 +111,5 @@ LLM hallucination 대응과 human-in-the-loop/RBAC 경계를 설명한다.
 4. ground-truth 기반 rule/LLM accuracy·false positives·조사 시간 평가.
 5. CI/SBOM/image security와 dev TestClient dependency migration.
 
-실제 EKS/AWS/DB/MODUI 서비스 변경, 운영 장애 주입, 자동복구, Docker build/Helm 설치,
-Git commit/push/remote 변경은 수행하지 않았다.
+실제 EKS/AWS/DB/MODUI 서비스 변경, 운영 장애 주입·부하 테스트, 자동복구,
+Docker build/Helm 설치와 운영 배포는 수행하지 않았다. 최종 문서 정리의 Git 상태는 최종 보고로 확인한다.

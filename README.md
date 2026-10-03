@@ -1,19 +1,16 @@
 # Kubernetes AIOps Incident Analysis Platform
 
-재사용 가능한 Python 3.12 기반 **증거 수집 및 장애 원인 추론 보조 플랫폼**입니다.
-기존 Kubernetes MVP를 유지하면서 Metrics/Logs correlation, LLM advisory, FastAPI, Discord와
-Docker/Helm 패키징을 확장했습니다. **클러스터 변경과 자동 복구는 실행하지 않습니다.**
+Python 3.12 기반 **Kubernetes 장애 증거 수집 및 원인 추론 보조 플랫폼**입니다.
+Pod 상태, Event, Metrics, Logs를 시간과 workload identity로 연결해 운영자가 검토할
+구조화 보고서와 추가 확인 방법을 제공합니다. **클러스터 변경과 자동 복구는 실행하지 않습니다.**
 
-## Problem
+Kubernetes 장애 조사에서 반복되는 Pod → Event → Metrics → Logs 조회를 줄이는 것이 목적입니다.
+Running Pod도 의존 서비스, ingress/routing 또는 애플리케이션 오류로 사용자 요청을 처리하지 못할 수 있어,
+관찰 사실과 원인 후보를 분리합니다. **증거가 부족하면 원인을 확정하지 않습니다.**
 
-Kubernetes 장애를 조사할 때 사람이 Pod → Event → Metrics → Logs를 반복 조회해야 합니다.
-Running Pod도 의존 서비스, ingress/routing 또는 애플리케이션 오류로 사용자 요청을 처리하지 못할 수 있습니다.
-MODUI EKS 운영 경험에서 출발했지만 코드에 MODUI 서비스 이름이나 endpoint를 내장하지 않았습니다.
-
-## Goal
-
-시간과 workload identity가 있는 증거를 모아 관찰 사실과 원인 후보를 분리하고,
-운영자가 검토할 구조화 보고서와 추가 확인 방법을 제공합니다. 증거가 부족하면 원인을 확정하지 않습니다.
+MODUI EKS 운영 경험에서 출발했으며, 코드에 MODUI 서비스 이름이나 endpoint를 내장하지 않았습니다.
+기존 Kubernetes MVP의 상태 탐지를 유지하면서 Metrics/Logs correlation, LLM advisory,
+FastAPI, Discord 및 Docker/Helm 패키징을 확장했습니다.
 
 ## Architecture
 
@@ -39,19 +36,18 @@ Structured Incident Report
 Terminal / JSON / Discord / FastAPI
 ```
 
-## Features
+## 핵심 기능
 
-- Kubernetes: regular/init/ephemeral container, current/previous termination, readiness, memory limit,
-  Pod UID로 Event 연결, bounded pagination, timeout과 부분 실패 처리.
-- Prometheus: 5분 CPU rate, memory working set/limit, restart total/increase, waiting/terminated, phase/readiness.
-  각 query 실패를 분리하며 empty result를 장애로 해석하지 않습니다.
-- Loki: namespace/pod/container, label mapping, 장애 시점 주변 시간 범위, line/response 제한,
-  signal filtering → credential masking → snippet truncation. 원본 로그를 저장하지 않습니다.
-- Correlation: Pod/container 및 최근 20분 증거만 연결, high/medium/low와 판단 근거 제공.
-- LLM: provider abstraction, Responses API JSON schema 및 로컬 출력 검증, timeout/refusal 시 규칙 결과 유지.
-- Discord: 환경변수 webhook, 메시지 길이 제한, mention 차단, incident identity 기반 15분 dedup.
-- FastAPI: namespace allowlist, optional bearer authentication, 단일 동시 분석, bounded memory store.
-- Snapshot, 명시적 bounded scheduled interface, 인증된 Alertmanager webhook interface.
+| 영역 | 구현 범위와 제약 |
+|---|---|
+| Kubernetes 증거 수집 | regular/init/ephemeral container, current/previous termination, readiness, memory limit 수집. Pod UID로 Event 연결, bounded pagination, timeout과 부분 실패 처리 |
+| Prometheus Metrics | 5분 CPU rate, memory working set/limit, restart total/increase, waiting/terminated, phase/readiness. query별 실패를 분리하고 empty result를 장애로 해석하지 않음 |
+| Loki Logs | namespace/pod/container 및 label mapping, 장애 시점 주변 시간 범위, line/response 제한. signal filtering → credential masking → snippet truncation 적용, 원본 로그 미저장 |
+| 증거 상관 분석 | Pod/container 및 최근 20분 증거만 연결. high/medium/low confidence와 판단 근거 제공 |
+| 선택적 LLM 분석 | provider abstraction, Responses API JSON schema 및 로컬 출력 검증. timeout/refusal 시 규칙 결과 유지 |
+| Discord 알림 | 환경변수 webhook, 메시지 길이 제한, mention 차단, incident identity 기반 15분 dedup |
+| FastAPI | namespace allowlist, optional bearer authentication, 단일 동시 분석, bounded memory store |
+| 실행·연동 방식 | Snapshot, 명시적 bounded scheduled interface, 인증된 Alertmanager webhook interface |
 
 ## Safety Design
 
@@ -74,12 +70,28 @@ DB와 observability 서버는 설치하지 않습니다.
 
 ## Quick Start
 
+### 1. 개발 의존성 설치
+
+기존 `.venv`의 Python을 사용하는 명령입니다.
+
 ```bash
 .venv/bin/python -m pip install -r requirements-dev.txt
-# 클러스터/네트워크/credential 불필요
+```
+
+### 2. 클러스터 없이 데모 실행
+
+데모에는 클러스터 연결, 네트워크, credential이 필요하지 않습니다.
+
+```bash
 .venv/bin/python -m examples.demo_incidents
 .venv/bin/python -m examples.demo_incidents --format json
+```
 
+### 3. Kubernetes snapshot 분석
+
+기존 Kubernetes SDK 인증 경로와 조회 가능한 namespace가 필요합니다.
+
+```bash
 # 기존 MVP CLI (default namespace, one snapshot)
 .venv/bin/python -m app.main --namespace your-namespace
 # 수집 → correlation → optional LLM/Discord
@@ -94,6 +106,8 @@ CLI 옵션이 YAML보다 우선하며 YAML은 `safe_load`와 키 검증을 사�
 기존 상태 RuleEngine의 category 이름과 테스트는 유지됩니다. `--structured`/JSON은 correlation category를 사용합니다.
 종료 코드: 0 분석 완료, 1 설정/Pod 조회 실패, 2 부분 증거 실패. 파일은 자동 저장하지 않습니다.
 
+### 4. 선택적 외부 연동 설정
+
 `.env.example`에는 변수 이름과 안전한 기본값만 있습니다. 프로그램은 `.env`를 자동 로딩하지 않습니다.
 프로세스 환경 또는 운영 Secret 관리 도구로 전달하세요. API key와 webhook은 환경변수만 읽습니다.
 `PROMETHEUS_URL`, `LOKI_URL`이 없으면 수집기는 비활성화됩니다.
@@ -102,10 +116,14 @@ LLM은 `AIOPS_LLM_ENABLED=true`, `OPENAI_MODEL`, `OPENAI_API_KEY`가 모두 필�
 
 ## API
 
+로컬 개발용 실행 예시입니다. 한 worker/replica를 사용합니다.
+
 ```bash
 AIOPS_ALLOWED_NAMESPACES=your-namespace .venv/bin/uvicorn app.api:app --host 127.0.0.1 --port 8000 --workers 1
 curl http://127.0.0.1:8000/health
-curl -X POST http://127.0.0.1:8000/api/analyze -H 'Content-Type: application/json' -d '{"namespace":"your-namespace"}'
+curl -X POST http://127.0.0.1:8000/api/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"namespace":"your-namespace"}'
 curl http://127.0.0.1:8000/api/incidents
 ```
 
@@ -150,17 +168,28 @@ HIGH_CPU 임계값은 cores(기본 0.8)이며 CPU limit 대비 백분율이 아�
 helm lint charts/aiops-engine
 helm template demo charts/aiops-engine --namespace aiops
 # untracked 파일도 별도 확인 필요
- git diff --check
+git diff --check
 ```
 
 테스트는 외부 수집과 LLM/Discord를 mock 처리합니다. FastAPI는 로컬 TestClient로 검증합니다.
-실제 EKS 검증과 외부 연동 미검증 범위는 [검증 기록](docs/validation.md)에 분리했습니다.
+아래는 [검증 기록](docs/validation.md)에 남긴 범위이며, 실제 연동 전체의 성공을 의미하지 않습니다.
+
+| 범위 | 검증 결과와 한계 |
+|---|---|
+| 로컬 테스트 | unittest 69개 통과, pytest 69개 및 subtest 31개 통과. TestClient deprecation warning과 sandbox 대기·timeout 이력은 검증 기록에 명시 |
+| 실제 EKS 조회 | 11개 Pod가 Running으로 조회됐고 structured CLI가 exit 0으로 완료. 경고 없는 snapshot이며 서비스 전체 정상 판정은 아님. 일부 조회는 timeout으로 실패 |
+| 외부 연동 | 실제 Prometheus/Loki query, 외부 LLM 호출, Discord 전송은 수행하지 않음. Prometheus/Loki 설치 여부도 미확인 |
+| 배포·운영 | API 운영 배포·공개, Docker build, Helm install, 실제 장애 주입·부하 테스트는 수행하지 않음. Helm lint/template 및 정적 검사는 수행 |
 
 ## Demo
 
-`python -m examples.demo_incidents` 한 명령으로 7개 장애 증거와 category/confidence를 재현합니다.
-각 fixture의 예상 category를 assert하며 실제 클러스터 연결이나 변경은 하지 않습니다.
-기존 `python -m examples.mock_report`도 유지합니다.
+7개 장애 증거와 category/confidence를 재현하며 각 fixture의 예상 category를 assert합니다.
+실제 클러스터 연결이나 변경은 하지 않습니다. 기존 터미널 데모도 유지합니다.
+
+```bash
+.venv/bin/python -m examples.demo_incidents
+.venv/bin/python -m examples.mock_report
+```
 
 ## Packaging
 

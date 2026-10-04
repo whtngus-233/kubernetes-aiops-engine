@@ -3,6 +3,8 @@ from hmac import compare_digest
 from uuid import UUID
 import threading
 from fastapi import FastAPI, Depends, Header, HTTPException
+from starlette.responses import JSONResponse
+import asyncio
 from pydantic import BaseModel, ConfigDict, Field
 from app.config import Settings
 from app.engine import AnalysisEngine
@@ -31,6 +33,23 @@ def create_app(settings=None, engine=None, store=None):
     app = FastAPI(title='Reusable Kubernetes AIOps Incident Analysis Platform', version='1.0.0')
     lock = threading.Lock()
 
+    @app.middleware('http')
+    async def bounded_body(request, call_next):
+        if request.method == 'POST':
+            try:
+                async with asyncio.timeout(5):
+                    chunks, size = [], 0
+                    async for chunk in request.stream():
+                        size += len(chunk)
+                        if size > 65536:
+                            return JSONResponse({'detail': 'Request body exceeds limit'}, status_code=413)
+                        chunks.append(chunk)
+                    request._body = b''.join(chunks)
+            except TimeoutError:
+                return JSONResponse({'detail': 'Request body timeout'}, status_code=408)
+        return await call_next(request)
+
+
     def auth(authorization: str | None = Header(default=None)):
         if settings.api_token and not compare_digest((authorization or '').encode(), ('Bearer ' + settings.api_token).encode()):
             raise HTTPException(401, 'Authentication required')
@@ -53,7 +72,7 @@ def create_app(settings=None, engine=None, store=None):
             lock.release()
 
     @app.get('/health')
-    def health():
+    async def health():
         return {'status': 'ok', 'mode': 'read-only', 'store': 'memory'}
 
     @app.post('/api/analyze', dependencies=[Depends(auth)])

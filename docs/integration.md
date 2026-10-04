@@ -59,3 +59,9 @@ Alertmanager endpoint는 토큰이 없으면 disabled입니다. firing namespace
 실제 Alertmanager 설정은 수정하지 않았습니다. 외부 scheduler는 `scheduled_analysis`를 명시적으로 호출하며
 iterations는 1–1000, interval_seconds는 최소 30초입니다. 기본은 1회/60초이며 import나 API 시작 시 자동 실행하지 않습니다.
 운영 무한 루프는 실행하지 않았습니다.
+
+CLI 역시 AIOPS_ALLOWED_NAMESPACES에 포함된 namespace만 허용합니다.
+실행 가능한 bounded scheduler: `python -m app.scheduling --namespace default --iterations 1 --interval 60`.
+SIGTERM/SIGINT 또는 stop_event는 대기와 다음 iteration을 취소합니다. 진행 중 요청은 자체 timeout까지
+대기할 수 있습니다. custom adapter에는 자체 timeout이 필요합니다. overlap은 같은 engine instance에서
+거부하며 multi-process 분산 lock은 제공하지 않습니다.

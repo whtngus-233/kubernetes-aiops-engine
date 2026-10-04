@@ -35,12 +35,16 @@ def main(argv=None):
             raise ValueError("namespace는 비어 있지 않은 문자열이어야 합니다.")
         if context is not None and (not isinstance(context, str) or not context.strip()):
             raise ValueError("context는 비어 있지 않은 문자열이어야 합니다.")
+        configuration = Settings.from_env()
+        if namespace not in configuration.allowed_namespaces:
+            raise ValueError('Namespace not allowed')
         engine = RuleEngine(threshold)
         collector = KubernetesCollector(context=context)
         snapshot = collector.collect(namespace)
+        warnings = snapshot.warnings
         if args.structured or args.format == 'json':
             from dataclasses import replace
-            configuration = replace(Settings.from_env(), allowed_namespaces=(namespace,), context=context,
+            configuration = replace(configuration, context=context,
                                     restart_threshold=threshold)
             reports, warnings = AnalysisEngine(configuration).analyze_snapshot(snapshot)
             report = (json.dumps({'incidents': [i.to_dict() for i in reports], 'warnings': warnings,
@@ -52,7 +56,7 @@ def main(argv=None):
             with args.output.open('x') as output:
                 output.write(report + '\n')
         print(report)
-        return 2 if snapshot.warnings else 0
+        return 2 if warnings else 0
     except CollectionError as error:
         print(f"분석 실패: {error}", file=sys.stderr)
         return 1

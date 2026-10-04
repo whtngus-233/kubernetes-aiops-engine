@@ -20,7 +20,7 @@ Discord 알림/dedup, FastAPI namespace allowlist/incident store, Docker/Helm �
 Pod 조회에서도 11개가 Running으로 확인됐다. 관측 API 일부 조회는 timeout되어
 Prometheus/Loki live integration은 확인하지 못했다. Grafana proxy 이름만으로 backend 존재를 주장하지 않는다.
 운영 서비스에는 장애를 주입하지 않았으며 offline mock fault scenarios 7개와 회귀 테스트로 검증했다.
-LLM/Discord는 mock 검증이다. Docker build/Helm 설치, AWS/DB/애플리케이션 변경은 수행하지 않았다.
+LLM/Discord는 mock 검증이다. 이번 Docker build는 socket 권한 거부로 완료하지 못했고 Helm 설치와 AWS/DB/애플리케이션 변경은 수행하지 않았다.
 상세 재현 명령과 결과는 validation.md를 참고한다.
 
 ## 포트폴리오에서 보여줄 것

@@ -1,5 +1,7 @@
 """Read-only Pod/Event collector; never exposes mutation operations."""
 import os
+import time
+from app.config import NAMESPACE
 from kubernetes import client, config
 from kubernetes.utils.quantity import parse_quantity
 from app.security import sanitize
@@ -35,8 +37,11 @@ class KubernetesCollector:
         items, token = [], None
         seen = set()
         for _ in range(100):
+            remaining = self._deadline - time.monotonic()
+            if remaining <= 0:
+                raise CollectionError('Collection deadline exceeded')
             response = method(namespace, limit=500, _continue=token,
-                              _request_timeout=(self.timeout, self.timeout), **kwargs)
+                              _request_timeout=(min(self.timeout, remaining), min(self.timeout, remaining)), **kwargs)
             items.extend(response.items)
             token = getattr(response.metadata, "_continue", None)
             if not token:
@@ -63,6 +68,9 @@ class KubernetesCollector:
             previous_terminated_reason=previous.reason if previous else None, ready=status.ready)
 
     def collect(self, namespace):
+        if not isinstance(namespace, str) or not NAMESPACE.fullmatch(namespace):
+            raise ValueError('Invalid namespace')
+        self._deadline = time.monotonic() + 30
         try:
             raw_pods = self._list(self.api.list_namespaced_pod, namespace)
         except Exception:

@@ -1,6 +1,7 @@
 """Unittest-compatible tests, discoverable by pytest; no cluster access."""
 import contextlib
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -116,7 +117,7 @@ class EngineTests(unittest.TestCase):
         api = Mock()
         snapshot = Snapshot('test', [pod()])
         api.collect.return_value = snapshot
-        with patch('app.main.KubernetesCollector', return_value=api), contextlib.redirect_stdout(io.StringIO()) as output:
+        with patch.dict(os.environ, {'AIOPS_ALLOWED_NAMESPACES': 'test'}), patch('app.main.KubernetesCollector', return_value=api), contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(['--namespace', 'test']), 0)
             self.assertIn('Pods: 1', output.getvalue())
             api.close.assert_called_once()
@@ -134,7 +135,7 @@ class EngineTests(unittest.TestCase):
             config.write_text('namespace: old\nrestart_threshold: 10\ncontext: old-context')
             api = Mock()
             api.collect.return_value = Snapshot('new', [])
-            with patch('app.main.KubernetesCollector', return_value=api) as constructor, contextlib.redirect_stdout(io.StringIO()):
+            with patch.dict(os.environ, {'AIOPS_ALLOWED_NAMESPACES': 'new'}), patch('app.main.KubernetesCollector', return_value=api) as constructor, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(['--config', str(config), '--namespace', 'new', '--context', 'new-context', '--restart-threshold', '2']), 0)
                 constructor.assert_called_once_with(context='new-context')
                 api.collect.assert_called_once_with('new')

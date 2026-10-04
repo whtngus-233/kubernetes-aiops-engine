@@ -1,5 +1,7 @@
 """Bounded HTTP transport. No redirects, retries or implicit proxy credentials."""
 import json
+import math
+import time
 from urllib.parse import urlsplit
 import requests
 
@@ -8,8 +10,11 @@ class HTTPTransport:
         self.max_bytes = max_bytes
 
     def request(self, method, url, *, params=None, payload=None, headers=None, timeout=5):
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError('Invalid HTTP timeout')
+        deadline = time.monotonic() + timeout
         parsed = urlsplit(url)
-        if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
             raise ValueError('Invalid endpoint')
         with requests.Session() as session:
             session.trust_env = False
@@ -19,6 +24,8 @@ class HTTPTransport:
                     raise ValueError('HTTP request failed')
                 chunks, size = [], 0
                 for chunk in response.iter_content(8192):
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError('HTTP response deadline exceeded')
                     size += len(chunk)
                     if size > self.max_bytes:
                         raise ValueError('HTTP response exceeds limit')

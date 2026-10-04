@@ -5,6 +5,8 @@ import threading
 
 class IncidentStore:
     def __init__(self, capacity=1000):
+        if type(capacity) is not int or not 1 <= capacity <= 10000:
+            raise ValueError('Invalid store capacity')
         self.capacity = capacity
         self._items = OrderedDict()
         self._lock = threading.Lock()

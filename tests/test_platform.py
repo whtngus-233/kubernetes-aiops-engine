@@ -6,7 +6,9 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
-from fastapi.testclient import TestClient
+import asyncio
+import httpx
+from tests.async_support import async_client, AsyncAPITestCase
 from app.models import CollectionResult, Snapshot, PodEvidence, ContainerEvidence, IncidentEvidence, utc_now
 from app.collectors.prometheus import PrometheusCollector, QUERIES
 from app.collectors.loki import LokiCollector
@@ -267,23 +269,31 @@ class DiscordTests(unittest.TestCase):
         os.environ['DISCORD_WEBHOOK_URL']='http://internal'
         self.assertEqual(DiscordNotifier().notify(incident()),'invalid_configuration')
 
-class APITests(unittest.TestCase):
-    def setUp(self):
+class APITests(AsyncAPITestCase):
+    async def asyncSetUp(self):
         self.engine=Mock(); self.report=incident(); self.engine.analyze.return_value=([self.report],[])
-        self.client=TestClient(create_app(Settings(allowed_namespaces=('demo',)),engine=self.engine))
+        self.client=async_client(create_app(Settings(allowed_namespaces=('demo',)),engine=self.engine))
 
-    def test_health(self):
-        self.assertEqual(self.client.get('/health').json()['mode'],'read-only')
+    async def asyncTearDown(self):
+        await self.client.aclose()
+
+    async def test_body_limit(self):
+        response = await self.client.post('/api/analyze', content=b'x' * 65537)
+        self.assertEqual(response.status_code, 413)
         self.engine.analyze.assert_not_called()
 
-    def test_analyze_and_retrieve(self):
-        response=self.client.post('/api/analyze',json={'namespace':'demo'})
+    async def test_health(self):
+        self.assertEqual((await self.client.get('/health')).json()['mode'],'read-only')
+        self.engine.analyze.assert_not_called()
+
+    async def test_analyze_and_retrieve(self):
+        response=await self.client.post('/api/analyze',json={'namespace':'demo'})
         self.assertEqual(response.status_code,200)
         self.assertFalse(response.json()['automatic_action_taken'])
-        self.assertEqual(len(self.client.get('/api/incidents').json()['incidents']),1)
-        self.assertEqual(self.client.get('/api/incidents/'+self.report.incident_id).status_code,200)
+        self.assertEqual(len((await self.client.get('/api/incidents')).json()['incidents']),1)
+        self.assertEqual((await self.client.get('/api/incidents/'+self.report.incident_id)).status_code,200)
 
-    def test_concurrent_analysis_rejected(self):
+    async def test_concurrent_analysis_rejected(self):
         import threading
         started, release=threading.Event(), threading.Event()
         def blocking(namespace):
@@ -291,52 +301,57 @@ class APITests(unittest.TestCase):
             release.wait(5)
             return [],[]
         self.engine.analyze.side_effect=blocking
-        results=[]
-        worker=threading.Thread(target=lambda:results.append(self.client.post('/api/analyze',json={'namespace':'demo'})))
-        worker.start()
+        worker=asyncio.create_task(self.client.post('/api/analyze',json={'namespace':'demo'}))
         try:
-            self.assertTrue(started.wait(5))
-            self.assertEqual(self.client.post('/api/analyze',json={'namespace':'demo'}).status_code,429)
+            for _ in range(500):
+                if started.is_set():
+                    break
+                await asyncio.sleep(.01)
+            self.assertTrue(started.is_set())
+            self.assertEqual((await self.client.post('/api/analyze',json={'namespace':'demo'})).status_code,429)
         finally:
-            release.set(); worker.join(5)
-        self.assertEqual(results[0].status_code,200)
+            release.set()
+        self.assertEqual((await asyncio.wait_for(worker,5)).status_code,200)
 
-    def test_validation_allowlist_and_commands(self):
-        self.assertEqual(self.client.post('/api/analyze',json={'namespace':'production'}).status_code,403)
-        self.assertEqual(self.client.post('/api/analyze',json={'namespace':'demo; rm'}).status_code,422)
-        self.assertEqual(self.client.post('/api/analyze',json={'namespace':'demo','command':'kubectl'}).status_code,422)
+    async def test_validation_allowlist_and_commands(self):
+        self.assertEqual((await self.client.post('/api/analyze',json={'namespace':'production'})).status_code,403)
+        self.assertEqual((await self.client.post('/api/analyze',json={'namespace':'demo; rm'})).status_code,422)
+        self.assertEqual((await self.client.post('/api/analyze',json={'namespace':'demo','command':'kubectl'})).status_code,422)
         self.engine.analyze.assert_not_called()
 
-    def test_unknown_and_invalid_ids(self):
-        self.assertEqual(self.client.get('/api/incidents/00000000-0000-0000-0000-000000000000').status_code,404)
-        self.assertEqual(self.client.get('/api/incidents/../secret').status_code,404)
-        self.assertEqual(self.client.get('/api/incidents/not-uuid').status_code,422)
+    async def test_unknown_and_invalid_ids(self):
+        self.assertEqual((await self.client.get('/api/incidents/00000000-0000-0000-0000-000000000000')).status_code,404)
+        self.assertEqual((await self.client.get('/api/incidents/../secret')).status_code,404)
+        self.assertEqual((await self.client.get('/api/incidents/not-uuid')).status_code,422)
 
-    def test_collection_failure(self):
+    async def test_collection_failure(self):
         self.engine.analyze.side_effect=CollectionError('private')
-        response=self.client.post('/api/analyze',json={'namespace':'demo'})
+        response=await self.client.post('/api/analyze',json={'namespace':'demo'})
         self.assertEqual(response.status_code,503); self.assertNotIn('private',response.text)
 
-    def test_authentication(self):
-        client=TestClient(create_app(Settings(allowed_namespaces=('demo',),api_token='fake-api-value'),engine=self.engine))
-        self.assertEqual(client.get('/api/incidents').status_code,401)
-        self.assertEqual(client.get('/api/incidents',headers={'Authorization':'Bearer fake-api-value'}).status_code,200)
+    async def test_authentication(self):
+        client=async_client(create_app(Settings(allowed_namespaces=('demo',),api_token='fake-api-value'),engine=self.engine))
+        self.addAsyncCleanup(client.aclose)
+        self.assertEqual((await client.get('/api/incidents')).status_code,401)
+        self.assertEqual((await client.get('/api/incidents',headers={'Authorization':'Bearer fake-api-value'})).status_code,200)
 
-    def test_webhook_disabled_and_auth(self):
+    async def test_webhook_disabled_and_auth(self):
         payload={'alerts':[{'status':'firing','labels':{'namespace':'demo'}}]}
-        self.assertEqual(self.client.post('/api/webhooks/alertmanager',json=payload).status_code,503)
-        client=TestClient(create_app(Settings(allowed_namespaces=('demo',),webhook_token='fake-hook-value'),engine=self.engine))
-        self.assertEqual(client.post('/api/webhooks/alertmanager',json=payload).status_code,401)
-        self.assertEqual(client.post('/api/webhooks/alertmanager',json=payload,headers={'X-Alertmanager-Token':'fake-hook-value'}).status_code,200)
+        self.assertEqual((await self.client.post('/api/webhooks/alertmanager',json=payload)).status_code,503)
+        client=async_client(create_app(Settings(allowed_namespaces=('demo',),webhook_token='fake-hook-value'),engine=self.engine))
+        self.addAsyncCleanup(client.aclose)
+        self.assertEqual((await client.post('/api/webhooks/alertmanager',json=payload)).status_code,401)
+        self.assertEqual((await client.post('/api/webhooks/alertmanager',json=payload,headers={'X-Alertmanager-Token':'fake-hook-value'})).status_code,200)
 
-    def test_webhook_scope_and_resolved(self):
-        client=TestClient(create_app(Settings(allowed_namespaces=('demo',),webhook_token='fake-hook-value'),engine=self.engine))
+    async def test_webhook_scope_and_resolved(self):
+        client=async_client(create_app(Settings(allowed_namespaces=('demo',),webhook_token='fake-hook-value'),engine=self.engine))
+        self.addAsyncCleanup(client.aclose)
         headers={'X-Alertmanager-Token':'fake-hook-value'}
-        self.assertEqual(client.post('/api/webhooks/alertmanager',json={'alerts':[{'status':'firing','labels':{'namespace':'other'}}]},headers=headers).status_code,403)
-        self.assertEqual(client.post('/api/webhooks/alertmanager',json={'alerts':[{'status':'resolved','labels':{'namespace':'demo'}}]},headers=headers).json()['analyses'],[])
+        self.assertEqual((await client.post('/api/webhooks/alertmanager',json={'alerts':[{'status':'firing','labels':{'namespace':'other'}}]},headers=headers)).status_code,403)
+        self.assertEqual((await client.post('/api/webhooks/alertmanager',json={'alerts':[{'status':'resolved','labels':{'namespace':'demo'}}]},headers=headers)).json()['analyses'],[])
 
-    def test_invalid_list_limit(self):
-        self.assertEqual(self.client.get('/api/incidents?limit=0').status_code,422)
+    async def test_invalid_list_limit(self):
+        self.assertEqual((await self.client.get('/api/incidents?limit=0')).status_code,422)
 
 class PipelineSecurityTests(unittest.TestCase):
     def test_optional_failures_keep_findings_and_close(self):

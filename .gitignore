@@ -20,3 +20,6 @@ credentials
 build/
 dist/
 *.egg-info/
+
+# Generated native Docker healthcheck
+/aiops-healthcheck

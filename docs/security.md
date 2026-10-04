@@ -24,5 +24,11 @@ API bearer 미설정은 로컬 개발 전용입니다. 운영은 AIOPS_API_TOKEN
 Webhook은 별도 token mandatory, 알림은 mention disabled입니다. chart는 non-root, read-only filesystem,
 drop ALL, seccomp RuntimeDefault를 적용합니다. healthcheck는 backend 연결 확인 기능이 아닙니다.
 
-남은 한계: 인증 backend adapters, distributed rate limiting, request byte limit, dependency vulnerability/SBOM scan,
+남은 한계: 인증 backend adapters, distributed rate limiting, dependency vulnerability/SBOM scan,
 PII policy, 중앙 감사 저장소. dependency check는 호환성 검사이며 vulnerability 검사가 아닙니다.
+
+API POST body는 64 KiB/5초 수신 한도를 적용합니다. CLI도 namespace allowlist를 재설정하지 않고
+검증합니다. Backend base URL은 관리자의 신뢰된 환경 설정이며 API/alert/LLM이 URL을 지정할 수 없습니다.
+내부 observability 연결 때문에 private IP를 허용합니다. 임의 외부 사용자의 URL을 환경 설정에
+반영하면 SSRF 경계가 없어지므로 이 설정을 untrusted request에서 만들지 않아야 합니다.
+이번 환경의 network/socket 제한은 우회하지 않았습니다.

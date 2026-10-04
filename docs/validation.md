@@ -1,129 +1,128 @@
-# Validation record — portfolio finalization, 2026-10-03 UTC
+# HOST 결과 반영 재검증 — 2026-10-04 UTC
 
-이번 작업은 README/docs 정확성 개선만 수행했다. 시작 시 working tree는 clean이고 HEAD는
-`b3b0f78`이었다. 구현·테스트·fixture는 변경하지 않았다. 아래의 이전 확장 검증 기록은
-기존 문서에 남아 있던 이력이며 이번 실행에서 재확인한 운영 결과가 아니다.
+기존 dirty working tree를 보존했다. Docker 명령, Kubernetes write, production 수정,
+Git commit/push/tag는 실행하지 않았다. 이번 수정 후 Docker runtime healthy는 HOST에서
+아직 확인되지 않았다. 최신 실제 HOST 결과는 전체 FAIL이며 해당 증거를 보존한다.
 
-## Current local validation
-
-기존 `.venv/bin/python`으로 실행했다. 전체 테스트에는 무한 대기를 막기 위해 `timeout 180`을 적용했다.
-
-| 명령 | 이번 결과 |
+| Check | 이번 수정 후 실제 결과 |
 |---|---|
-| `.venv/bin/python -m compileall -q app tests examples scripts` | 성공 (exit 0) |
-| `.venv/bin/python -m examples.demo_incidents` | 성공, 7개 expected category 일치 |
-| `.venv/bin/python -m examples.demo_incidents --format json` | 성공, 7개 expected category 일치 |
-| `.venv/bin/python -m unittest discover -s tests -v` | 180초 timeout (exit 124); 기존 14개 통과 후 첫 API 테스트에서 대기, 전체 통과 미확인 |
-| `.venv/bin/python -m pytest -q` | 180초 timeout (exit 124); 진행 출력만 있고 최종 결과 없음, 전체 통과 미확인 |
-| `.venv/bin/python -m pip check` | 성공, No broken requirements found |
-| `.venv/bin/python scripts/security_scan.py` | 성공, 65 source files; heuristic 검사 |
-| `helm lint charts/aiops-engine` | 성공, 1 chart linted / 0 failed; icon 권장 INFO |
-| `helm template demo charts/aiops-engine --namespace aiops` | 성공 (exit 0); 로컬 렌더링만 수행 |
-| `git diff --check` | 성공; 최종 문서 변경 후 다시 확인 |
+| compileall app/tests/examples/scripts | PASS |
+| native C probe compile (-Os -Wall -Wextra -Werror) | PASS |
+| full unittest | PASS: 101 tests, 61.999s |
+| full pytest | PASS: 101 passed, 55 subtests passed, 131.30s |
+| Integration/failure/health/HOST/runtime/native regression | PASS: 31 passed, 24 subtests passed, 85.80s |
+| Seven terminal/JSON demos + legacy mock_report | PASS: 7 categories, JSON/fixture parse, automatic_action_taken=false |
+| Source security scan | PASS: 79 allowlisted source files, C 포함; heuristic only |
+| pip check | PASS: No broken requirements found |
+| git diff --check | PASS |
+| Helm lint | PASS: 1 chart, 0 failures; optional icon INFO |
+| Helm template / RBAC | PASS: default/2 namespace YAML; pods/events get/list Role만, ClusterRole/Secret 없음 |
+| HOST script bash -n / embedded Python compile | PASS |
+| shellcheck | NOT AVAILABLE: executable 미설치; 실행 성공을 주장하지 않음 |
+| Docker build/runtime after this revision | PENDING HOST: sandbox에서 실행하지 않음 |
+| Latest operator HOST Docker result before this revision | build/running/HTTP 200 PASS; health unhealthy, overall FAIL |
+| Latest operator CPU / PIDS / zombies | mostly 0.x%, spikes 374.81/56.29%; PIDS 2/3/7; zombies all 0 |
+| Latest operator external readiness | Prometheus 200; Loki HTTPError; Kubernetes GET deadline exceeded |
+| Other containers / production / Kubernetes writes | 이 환경에서 변경 없음; HOST script는 다른 container snapshot 비교 |
+| Git commit/push/tag | 실행하지 않음 |
 
-`scheduling.py`의 iterations 범위는 README와 동일한 1–1000, interval 최소 30초다.
-Demo는 fixture를 로드하고 실행 시 timestamp/UUID를 생성한다. README의 두 대표 사례는 실제
-터미널 출력에서 timestamp/summary/일부 상태 필드만 생략했다. 수치는 성능·정확도 평가가 아니다.
+단일 native exec probe로 Python/urllib/import/shell 비용을 제거했다. HEALTHCHECK의 실제
+CMD 배열을 image/container inspect로 검사하고 timeout은 3초 유지한다. `/health`는 이미
+async였으며 유지했다. CPU는 cgroup 누적량/elapsed, PIDS는 identity/lifetime과 runc init
+threads를 관찰한다. FAIL/non-availability는 각각 exit 1/2이고 Bash+tee 회귀 검증을 한다.
+외부 Loki status/안전한 body와 Kubernetes timeout을 application 실패와 분리한다.
 
-## Current test limitations
+실제 spike/timeout의 최종 원인은 HOST 시각별 task/runtime 증거가 필요하다. runc startup은
+upstream 근거가 있는 후보이며 이번 HOST 원인으로 확정한 것은 아니다.
+[상세 조사·측정 기준·단일 HOST 실행 명령](host-validation.md)을 참고한다.
 
-추가로 `.venv/bin/python -m pytest -q tests/test_engine.py tests/test_platform.py -k 'not APITests'`는
-**59 passed, 10 deselected, 31 subtests passed**, 34.40초, warning 1개로 완료했다.
-이 결과는 API 테스트 10개를 검증한 결과가 아니다. Starlette TestClient의 httpx deprecation warning이 있다.
-
-전체 unittest는 `APITests.test_analyze_and_retrieve`에서 대기했고 pytest도 완료되지 않았다.
-기존 validation 기록에 같은 TestClient 대기 이력이 있으나 이번 timeout의 근본 원인은 확정하지 못했다.
-단일 API 테스트에 `faulthandler.dump_traceback_later(10)`과 `timeout 30`을 적용한 진단 프로세스는
-Pydantic schema 생성 중 부분 stack만 출력하고 segmentation fault (exit 139)로 종료했다.
-이 진단은 테스트 통과나 앱 회귀의 증거로 사용하지 않는다. 코드/의존성을 바꾸거나 sandbox를 우회하지 않았다.
-실제 코드 회귀를 확인하지 못했으므로 코드 수정 없이 문서에 미완료 검증을 명시했다.
-
-## Current operational scope
-
-이번에는 Kubernetes를 다시 조회하지 않았고 변경하지 않았다. 아래 11개 Running Pod와 CLI exit 0은
-이전 read-only 검증 기록이다. 현재 운영 상태나 서비스 전체 정상 여부를 보장하지 않는다.
-Prometheus/Loki live query, 실제 OpenAI/LLM 및 Discord 호출은 새로 수행하지 않았다.
-Docker build, Helm install, 실제 장애 주입·부하 테스트와 운영 배포는 수행하지 않았다.
-패키지 설치, 인증 변경, sandbox 우회도 수행하지 않았다. 자동복구 기능은 없다.
+추가 legacy demo 실행 중 존재하지 않는 `examples.demo` 모듈을 잘못 지정해 실패했고,
+실제 `examples.mock_report`로 교정해 실행했다. 테스트 삭제/skip은 없다.
 
 ---
 
-# Previous expansion validation record — 2026-10-03 UTC
+# Earlier engineering baseline validation — historical record
 
-## Audit and scope
+아래는 이번 health 수정 이전 단계의 기록이며 현재 HOST 상태 또는 이번 실행 결과를 뜻하지 않는다. 이전 포트폴리오 작업과 최초 EKS 성공 기록은
+[validation-history.md](validation-history.md)에 보존하며 이번 성공으로 계산하지 않는다.
+시작 working tree는 clean, HEAD는 `4ae4853`이었다. credential 생성/출력, cluster mutation,
+자동복구, 운영 장애 주입, sandbox 우회는 수행하지 않았다.
 
-기존 MVP 14개 unittest가 먼저 통과했다. 시작 시 소스 파일은 모두 untracked였다.
-코드/테스트를 유지하며 확장했다. Ubuntu/Python 3.12 기존 virtualenv를 사용했다.
-초기 MVP 기록에는 pytest 설치 실패와 EKS timeout이 있었지만 이번 확장 실행에서는
-제한 밖 패키지 설치와 일부 READ-ONLY EKS 조회가 성공했다. 이전 결과를 현재 결과로 혼동하지 않는다.
+| Check | Actual result |
+|---|---|
+| compileall app/tests/examples/scripts | PASS |
+| python -m unittest discover -s tests -v | PASS: 82 tests, 11.196 seconds |
+| pytest -q | PASS: 82 passed, 38 subtests passed, 32.60 seconds |
+| Offline API pipeline integration | PASS: 별도 integration 실행 2 passed (27.30 seconds); 실제 engine/normalization/correlation/API/store 사용 |
+| python -m examples.demo_incidents | PASS: 7 fixture categories |
+| python -m examples.demo_incidents --format json | PASS: 7 fixture categories, JSON parse 확인 |
+| scripts/security_scan.py | PASS: heuristic source secret scan |
+| pip check | PASS: No broken requirements found |
+| Docker build -t aiops-engine:1.0.0 . | FAIL: Docker API unix socket permission denied; image 생성 불가 |
+| Docker runtime health | NOT AVAILABLE: build가 실패하여 실행할 image 없음 |
+| helm lint charts/aiops-engine | PASS: 1 chart, 0 failures (optional icon INFO) |
+| helm template demo charts/aiops-engine --namespace aiops | PASS: YAML/RBAC 정적 검사 포함 |
+| Isolated Helm install | 실행하지 않음: isolated namespace의 접근·안전성 확인 불가 |
+| kubectl get pods / get namespaces --request-timeout=8s | 접근 완료하지 못함; namespaces 조회 전체 60초 timeout, exit 124 |
+| Actual KubernetesCollector default namespace | FAIL: sanitized Pod 조회 실패, exit 1; 현재 READ-ONLY 연동 NOT AVAILABLE |
+| Uvicorn app.api:app process | startup와 shutdown 완료; loopback bind 거부로 실제 HTTP health/분석 성공 미검증 |
+| curl localhost health | 연결 실패 (exit 7), 성공으로 간주하지 않음 |
+| Prometheus / Loki | endpoint 미설정; live NOT AVAILABLE, mock timeout/empty/malformed/partial failure PASS |
+| LLM advisory | model/enable 미설정, live NOT CONFIGURED; key 없음/timeout/invalid JSON/schema/unexpected response fallback PASS |
+| Discord | webhook/enable 미설정, live NOT CONFIGURED; disabled/timeout/error/dedup/masking mock PASS |
+| Scheduler | bounds/cancellation/errors/recovery/overlap PASS; invalid CLI bounds exit 2 |
+| git diff --check | PASS |
 
-## Local checks
+## TestClient 정지 원인과 변경 이유
 
-- `python -m unittest discover -s tests -q`: **69 tests passed**, 기존 14개 포함.
-- `python -m pytest -q`: **69 passed, 31 subtests passed**, 61.60초. Starlette TestClient deprecation warning 1개.
-- `python -m compileall -q app tests examples scripts`: 성공.
-- `python -m pip check`: No broken requirements found.
-- `python scripts/security_scan.py`: source allowlist secret pattern scan 통과. heuristic이지 전수 보장은 아니다.
-- `git diff --check`: 성공. 소스가 untracked이므로 별도 whitespace scan도 수행했다.
-- `python -m examples.demo_incidents --format json`: 7개 fixture의 expected category가 모두 일치.
-- `python -m examples.mock_report`: 기존 터미널 데모 성공.
-- `helm lint charts/aiops-engine`: 1 chart linted, 0 failed. 선택 사항인 icon recommendation만 표시.
-- `helm template` default namespace 및 team-a/team-b 설정 렌더링 성공.
-- rendered YAML parse/RBAC 검사: default 6개 리소스, Secret/ClusterRole 없음,
-  Role resources=pods/events, verbs=get/list 확인.
-- 앱 소스의 unsafe subprocess/shell/mutation/YAML loading 패턴 검색 결과 없음.
+요청받은 기존 전체 unittest를 먼저 실행했고 첫 API 테스트에서 90초 timeout을 재현했다.
+기존 `pytest -q`는 별도로 `ModuleNotFoundError: app` 수집 실패를 보였다. `pytest.ini`에
+repository pythonpath를 지정해 console pytest와 python -m pytest의 import 동작을 일치시켰다.
 
-## Test environment limitations
+앱을 제외한 `TestClient(FastAPI()).get('/')`도 대기했다. faulthandler 스택은 호출 스레드의
+AnyIO `run_sync_from_thread`/Future wait와 portal 스레드의 asyncio selector wait를 보여줬다.
+독립 socketpair probe의 `send()`는 `PermissionError`, errno 1 (EPERM)이었다.
+독립 asyncio.to_thread는 결과 42를 받았지만 runner shutdown의 스레드 wakeup에서 대기했다.
+따라서 수집기 네트워크, DB, scheduler lifecycle 또는 app import side effect가 필요 없는
+환경 제한 재현을 확보했다. 이전 schema 생성 중 segfault 기록은 재현되지 않았으며
+새 검증에서 segmentation fault가 없었다. 과거 segfault 자체의 원인을 확정했다는 뜻은 아니다.
 
-샌드박스에서 FastAPI TestClient의 asyncio thread portal이 대기했다. 진단 stack에서 selector/future wait를 확인했다.
-제한 밖 mock tests에서는 정상 완료됐다. 한 번의 60초 제한 pytest는 3개 테스트 후 timeout되어 통과로 간주하지 않았다.
-최종 unittest/pytest는 테스트가 실제 완료된 결과만 기록한다. 반복 대기하던 로컬 테스트 프로세스는 중단했다.
-Starlette 1.7.0은 httpx TestClient fallback deprecation warning을 낸다. 현재 동작은 테스트로 확인하지만
-향후 httpx2 dev adapter migration을 검토해야 한다.
-패키지 설치는 처음 sandbox DNS 실패 후 허용된 재시도에서 성공했다.
+API 테스트를 `unittest.IsolatedAsyncioTestCase`와 httpx.AsyncClient/ASGITransport로 전환했다.
+Python 3.12용 Runner factory는 socketpair send가 EPERM인 경우에만 selector wait를 최대 10ms로
+제한해 cross-thread callback을 처리한다. 정상 환경에서는 표준 event loop를 사용한다.
+운영 앱/의존성/endpoint/worker를 monkeypatch하지 않고 테스트 harness에만 적용했다.
+테스트 삭제/skip은 없으며 validation/auth/allowlist/429/webhook/조회 assertion을 유지했다.
+모든 client를 닫으며 concurrent test task를 회수한다. FastAPI lifecycle은 자동 scheduler나
+외부 호출을 시작하지 않는다. 실제 socket HTTP는 별도 시도했고 환경 때문에 실패한 것으로 기록한다.
 
-## Actual Kubernetes READ-ONLY checks
+검증 환경: Python 3.12, FastAPI 0.142.2, Starlette 1.7.0, httpx 0.28.1,
+AnyIO 4.15.1, Pydantic 2.13.5. 기존 패키지 변경/credential 우회 없이 검증했다.
 
-현재 context 이름 확인: modui-eks를 가리키는 기존 EKS context (kubeconfig 내용 출력 없음).
-`kubectl get pods -n modui-prod`에서 **11개 Pod가 Running**으로 조회됐다.
-확장 CLI `python -m app.main --namespace modui-prod --structured`는 **exit 0**으로 완료했고
-configured rule findings가 없었다. 경고 없는 snapshot 결과이며 실제 서비스 전체 정상 판정은 아니다.
-조회된 Pod/metric/log/Event 원본을 fixture나 Git 파일로 저장하지 않았다.
+## Failure coverage와 시간 제한
 
-연결은 불안정했다. sandbox 및 일부 제한 밖 services/namespaces/cluster-wide pods 조회는
-10/15초 request timeout으로 실패했다. 연속 무제한 retry는 하지 않았다.
-Kubernetes SDK 재시도는 0으로 설정했다. Pod/Event client collection은 bounded pagination과 timeout을 사용한다.
+CrashLoop/ImagePull/OOM/High CPU/DB refused/routing/Pending fixtures, empty/conflicting/stale/cross-workload
+증거, source timeout/unavailable/malformed/partial failure, LLM invalid JSON/schema/unexpected response,
+Discord 실패, scheduler 취소/오류 복구를 offline 검증했다. 규칙 원인 미확정과 automatic_action_taken=false를 유지한다.
 
-## Prometheus / Grafana / Loki discovery
+Kubernetes 30초 collection deadline/100 pages/500 items, Prometheus 20초 collection deadline/
+query별 10000 samples, HTTP response 2MB, Loki 1–1000 lines와 1–1440분 제한을 적용한다.
+요청 자체 timeout과 단계 deadline은 강제 thread kill이 아닌 cooperative bounds다.
+진행 중 요청은 자체 connect/read timeout까지 걸릴 수 있고 kubeconfig exec 인증 plugin과 custom adapter는
+해당 환경의 자체 bounded execution이 필요하다. LLM/Discord는 최대 10 incidents와 60초 advisory 시작
+budget을 적용하며 규칙 보고서는 삭제하지 않는다. stop_event/SIGTERM은 interval과 다음 실행을
+취소하고 진행 중 수집은 timeout 내 반환 후 종료한다. 분산 lock은 없다.
 
-EndpointSlice 전체 이름 조회가 한 번 성공했고 modui-prod의 grafana-proxy 및 앱 endpoint names를 확인했다.
-modui-prod Pod 조회에서도 grafana-proxy Pod가 확인됐다. 이것은 Grafana/Prometheus/Loki backend의
-존재나 query 성공을 증명하지 않는다. Services/Namespaces/전체 Pod 조사 일부가 timeout되어
-Prometheus, kube-state-metrics, node-exporter와 Loki의 설치 여부는 **미확인**이다.
-안전한 backend query endpoint를 확인하지 못해 실제 Prometheus/Loki query는 수행하지 않았다.
-설치/배포/port-forward/proxy 권한 변경 없이 코드·mock tests·설정·향후 연결 문서를 제공했다.
+## 남은 실제 검증
 
-## LLM / Discord / FastAPI
+접근 가능한 Docker daemon에서 build/runtime health, network가 허용된 환경에서 실제 API HTTP,
+조회 가능한 Kubernetes와 isolated namespace, 기존 Prometheus/Loki backend/labels/auth,
+설정된 LLM model과 Discord의 live integration이 필요하다. dependency vulnerability/SBOM scan,
+Service/Ingress topology, metric/log UID, time-series, persistent/shared store는 미구현이다.
 
-LLM: disabled, provider success/malformed/timeout/incomplete, structured JSON, no tools,
-output sanitize/limit을 mock으로 검증했다. 실제 API key 조회·출력/외부 LLM 호출은 하지 않았다.
-LLM 결과는 rule category/confidence를 덮어쓰지 않는다.
-Discord: disabled, successful delivery/duplicate, failure retry, invalid endpoint를 mock 검증했다.
-실제 webhook 메시지는 보내지 않았다.
-FastAPI: health, analyze/retrieval, allowlist/extra command rejection, IDs, auth,
-collector failure, concurrency 429, authenticated/disabled webhook을 local TestClient로 검증했다.
-실제 API 서버를 운영 환경에 배포하거나 공개하지 않았다.
+## Final Git outcome
 
-## Packaging / Git / safety
-
-Dockerfile 작성과 source/static 검토만 했다. **Docker build는 실행하지 않았다.**
-Helm lint/template/static 검사만 했다. **Helm install/upgrade/uninstall을 실행하지 않았다.**
-EKS/AWS/DB/MODUI application 변경, Secret 조회, workload fault injection, 트래픽 부하 테스트는 없었다.
-Git add/commit/push 및 remote 변경은 하지 않았다. .venv/cache/credentials/env는 Git/Docker 제외 대상이다.
-
-## Before deployment
-
-접근 가능한 기존 Prometheus/Loki와 실제 label/metric/auth/tenant 정책 확인,
-운영자의 Secret provision 및 API token/TLS/network policy, 이미지 build/vulnerability/SBOM scan,
-reviewed chart values/RBAC, real integration tests가 필요하다.
-한 worker/replica와 메모리 store의 데이터 손실/재시작 dedup reset을 먼저 수용하거나 shared store를 구현한다.
+`git add`와 요청된 `git commit -m 'feat: finalize aiops engineering baseline'`을 시도했으나
+`.git/index.lock`: Read-only file system으로 모두 exit 128이다. 새 commit은 생성되지 않았고
+변경 파일은 workspace에 유지된다. 원격 tag 조회는 github.com DNS 실패 (exit 128)였다.
+새 commit을 만들 수 없으므로 기존 HEAD에 v1.0.0을 붙이지 않았다. Git 제한을 우회하지 않았다.
+`git push origin main`도 실제 시도했으며 github.com DNS 실패로 exit 128이다.

@@ -17,3 +17,22 @@ Docker 단일 snapshot만 제공, Helm/ADR/면접 설명 부재.
 source/time/window, optional bounded backend adapters, read-only advisory API 및 배포 예제.
 Credential 파일/내용과 Pod env는 조사하지 않았습니다. 현재 context 이름만 확인했습니다.
 Git commit/push/remote 변경, cluster/AWS/DB/MODUI 코드 변경은 수행하지 않았습니다.
+
+
+## Engineering baseline 감사
+
+clean HEAD 4ae4853에서 README/docs/app/tests/examples/scripts/charts와 Git 이력을 대조했다.
+기존 구현의 collector/rules/correlation/LLM/report/API/store/security/Docker/Helm을 유지했다.
+발견 및 수정: CLI가 allowlist를 덮어썼음, engine/scheduler 간 overlap guard 없음,
+snapshot을 반복 분석하면 optional evidence 누적, scheduler NaN/float bounds 검증 부족과
+예외 시 iteration 중단, API POST bytes 미제한, 요청만 timeout이고 pagination/advisory 누적 budget 부재.
+TestClient 최소 재현은 socketpair send EPERM과 asyncio wakeup 대기였고 pytest console import도 실패했다.
+수정 및 현재 검증 결과는 validation.md가 기준이며 위 초기 감사의 과거 결과와 구분한다.
+
+## Final health investigation — 2026-10-03
+
+Preserved all existing changes. Converted health to async; replaced shell-form Docker probe
+with direct stdlib Python probe without increasing 3s timeout. Added worker-capacity/probe
+failure tests and offline HOST-script safety tests. No Docker command or Kubernetes write
+was executed. HOST final runtime verification and CPU/PIDS/zombie cause confirmation remain
+pending; commit/push/tag are explicitly deferred. See [host-validation.md](host-validation.md).

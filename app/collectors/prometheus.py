@@ -1,3 +1,4 @@
+import time
 """Namespace-scoped instant queries with partial-failure isolation."""
 import math
 import re
@@ -29,10 +30,15 @@ class PrometheusCollector:
             return result
         if not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', namespace):
             raise ValueError('Invalid namespace')
+        deadline = time.monotonic() + 20
         for key, query in QUERIES.items():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                result.warnings.append('prometheus: collection deadline reached')
+                break
             try:
                 response = self.transport.request('GET', self.endpoint + '/api/v1/query',
-                    params={'query': query % namespace}, timeout=self.timeout)
+                    params={'query': query % namespace}, timeout=min(self.timeout, remaining))
                 if response.get('status') != 'success' or response['data']['resultType'] != 'vector':
                     raise ValueError('Invalid Prometheus response')
                 rows = response['data']['result']

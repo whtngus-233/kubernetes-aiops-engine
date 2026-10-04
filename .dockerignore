@@ -4,3 +4,7 @@
 !app/**
 app/**/__pycache__/
 app/**/*.pyc
+!scripts/
+!scripts/healthcheck.c
+
+!aiops-healthcheck

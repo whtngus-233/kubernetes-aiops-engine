@@ -108,7 +108,7 @@ Kubernetes 상태와 로그 모두 fixture에서 로드하며 실제 클러스�
 운영자의 추가 검토를 위한 결과입니다.
 
 검증 범위는 아래 Testing / Validation 기록과 같습니다. Prometheus/Loki live endpoint와 실제 query는 미검증이며,
-실제 LLM/Discord 호출, Docker build, Helm install은 수행하지 않았습니다.
+실제 LLM/Discord 호출과 Helm install은 수행하지 않았습니다. 이전 HOST build와 HTTP 200은 사용자 확인 상태이며 Docker unhealthy 해결 후 실제 runtime 검증은 대기 중입니다.
 이전 실제 Kubernetes 검증은 read-only 조회 범위이며, **자동 복구(no auto-remediation)는 실행하지 않습니다.**
 
 ### Fixture categories
@@ -141,22 +141,24 @@ helm template demo charts/aiops-engine --namespace aiops
 git diff --check
 ```
 
-테스트는 외부 수집과 LLM/Discord를 mock 처리합니다. FastAPI는 로컬 TestClient로 검증합니다.
+테스트는 외부 수집과 LLM/Discord를 mock 처리합니다. FastAPI는 native httpx ASGITransport로 검증합니다.
+TestClient 정지 원인과 제한 환경의 테스트 loop 처리는 [검증 기록](docs/validation.md)에 설명합니다.
 아래는 [검증 기록](docs/validation.md)에 남긴 범위이며, 실제 연동 전체의 성공을 의미하지 않습니다.
 
 | 범위 | 검증 결과와 한계 |
 |---|---|
-| 로컬 테스트 | 이번 전체 unittest/pytest는 180초 timeout으로 완료 미확인. API 제외 pytest는 59개와 subtest 31개 통과. 이전 전체 69개 통과 기록과 이번 결과는 구분 |
-| 실제 EKS 조회 | 이전 read-only 검증 기록에서 11개 Pod가 Running으로 조회됐고 structured CLI가 exit 0으로 완료. 이번 정리 작업에서는 클러스터를 다시 조회하지 않음. 경고 없는 snapshot이며 서비스 전체 정상 판정은 아님. 일부 조회는 timeout으로 실패 |
-| 외부 연동 | 실제 Prometheus/Loki query, 외부 LLM 호출, Discord 전송은 수행하지 않음. Prometheus/Loki 설치 여부도 미확인 |
-| 배포·운영 | API 운영 배포·공개, Docker build, Helm install, 실제 장애 주입·부하 테스트는 수행하지 않음. Helm lint/template 및 정적 검사는 수행 |
+| 로컬 테스트 | unittest 101개, pytest 101개/55 subtests PASS; native probe·HOST script·runtime 회귀 검증 포함. [최종 검증 기록](docs/validation.md) |
+| 실제 Kubernetes | 최신 HOST READ-ONLY pods 조회는 command deadline 초과로 외부 connectivity 미확보. 이전 성공 이력은 [별도 이력](docs/validation-history.md)이며 현재 성공으로 간주하지 않음 |
+| 외부 연동 | 최신 HOST Prometheus readiness 200, Loki HTTPError; 수정 후 live readiness는 HOST 재검증 대기. LLM/Discord live 미검증 |
+| 실제 HTTP 서버 | HOST 이전 host/container `/health` HTTP 200 사용자 확인; 이번 수정은 ASGI 검증, 실제 Docker health는 대기 |
+| 배포 | HOST 이전 build/HTTP 200 확인, Docker unhealthy 관찰. 최종 runtime은 HOST 검증 대기. Helm lint/template 정적 검증, 설치 없음 |
 
 ## Packaging
 
 Python slim/non-root Dockerfile, healthcheck, allowlist Docker context를 제공합니다.
 [Helm chart](charts/aiops-engine/README.md)는 Deployment/Service/ConfigMap/ServiceAccount와
 namespace별 pods/events get/list Role/RoleBinding, probes/resources, hardened securityContext를 포함합니다.
-Secret 자체, AWS 권한, ClusterRole은 포함하지 않습니다. **Docker build와 Helm install은 실행하지 않았습니다.**
+Secret 자체, AWS 권한, ClusterRole은 포함하지 않습니다. **HOST에서 이전 build는 성공했으며, 최종 수정 image의 build/runtime은 HOST 검증 대기 중입니다. Helm install은 수행하지 않았습니다.**
 
 ## Tech Stack
 
@@ -168,10 +170,12 @@ DB와 observability 서버는 설치하지 않습니다.
 
 ### 1. 개발 의존성 설치
 
-기존 `.venv`의 Python을 사용하는 명령입니다.
+Python 3.12와 virtualenv를 사용합니다. 새 checkout에서는 아래 순서로 준비합니다.
 
 ```bash
-.venv/bin/python -m pip install -r requirements-dev.txt
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
 ```
 
 ### 2. 클러스터 없이 데모 실행
@@ -188,7 +192,8 @@ DB와 observability 서버는 설치하지 않습니다.
 기존 Kubernetes SDK 인증 경로와 조회 가능한 namespace가 필요합니다.
 
 ```bash
-# 기존 MVP CLI (default namespace, one snapshot)
+export AIOPS_ALLOWED_NAMESPACES=your-namespace
+# 기존 MVP CLI (one snapshot)
 .venv/bin/python -m app.main --namespace your-namespace
 # 수집 → correlation → optional LLM/Discord
 .venv/bin/python -m app.main --namespace your-namespace --structured
@@ -198,7 +203,8 @@ DB와 observability 서버는 설치하지 않습니다.
 ```
 
 기존 `--config config.example.yaml`, `--context`, `--restart-threshold`를 유지합니다.
-CLI 옵션이 YAML보다 우선하며 YAML은 `safe_load`와 키 검증을 사용합니다.
+CLI context/restart threshold는 옵션 또는 YAML로 지정하며 기본값은 current context/5입니다.
+CLI 옵션이 YAML보다 우선하며 namespace는 환경 allowlist에 포함되어야 합니다. YAML은 `safe_load`와 키 검증을 사용합니다.
 기존 상태 RuleEngine의 category 이름과 테스트는 유지됩니다. `--structured`/JSON은 correlation category를 사용합니다.
 종료 코드: 0 분석 완료, 1 설정/Pod 조회 실패, 2 부분 증거 실패. 파일은 자동 저장하지 않습니다.
 
@@ -233,8 +239,95 @@ API는 command, endpoint, path, kubeconfig 입력을 받지 않으며 추가 필
 `POST /api/webhooks/alertmanager`는 `ALERTMANAGER_TOKEN` 설정 시에만 활성화되며
 `X-Alertmanager-Token`과 최대 20개의 firing alerts에서 namespace만 검증해 새 증거를 수집합니다.
 전달된 annotations를 사실/명령으로 사용하지 않습니다. 실제 Alertmanager 설정은 변경하지 않았습니다.
-`app.scheduling.scheduled_analysis`는 iterations 1–1000, interval 최소 30초의 명시적 interface이며
-프로그램 시작 시 schedule/무한 루프를 실행하지 않습니다.
+`app.scheduling.scheduled_analysis`는 iterations 1–1000, finite interval 최소 30초의 명시적 interface입니다.
+import/API startup에는 시작하지 않습니다. SIGINT/SIGTERM은 다음 실행과 interval 대기를 취소합니다.
+진행 중 동기 수집은 해당 요청 timeout까지 완료한 뒤 종료합니다. 예외는 마스킹된 warning으로 반환하고
+다음 iteration을 유지합니다. 같은 엔진의 동시 실행은 거부합니다.
+
+```bash
+AIOPS_ALLOWED_NAMESPACES=your-namespace python -m app.scheduling \
+  --namespace your-namespace --iterations 5 --interval 60
+```
+
+수집기에는 요청 timeout과 Kubernetes 30초/Prometheus 20초 collection deadline을 적용합니다.
+Loki는 기본 5초, LLM 15초, Discord 5초입니다. LLM/notification은 분석당 최대 10개 incident에 적용하고
+snapshot 분석 시작 후 60초가 지나면 추가 advisory를 시작하지 않습니다. 진행 중 요청은 자체 timeout까지
+걸릴 수 있습니다. 전체 규칙 보고서는 보존합니다. 외부에서 주입한 adapter에도 유한 timeout이 필요합니다.
+API POST body는 최대 64 KiB, 수신 timeout은 5초입니다.
+
+## Repository structure
+
+```text
+app/         collectors, normalization, correlation/rules, reports, API/CLI/scheduler
+             optional LLM/Discord, bounded store, HTTP transport, security/config
+tests/       unit, offline ASGI integration, failure regression, seven fixtures
+examples/    offline incident and legacy report demos
+scripts/     source secret pattern scan, bounded HOST final validation
+charts/      namespace-scoped Helm deployment
+docs/        architecture, ADR, integration, security, audit and validation records
+```
+
+## Environment variables
+
+`.env.example`은 변수 목록입니다. `.env`는 자동 로드하지 않습니다.
+
+| Variable | Default / purpose |
+|---|---|
+| AIOPS_ALLOWED_NAMESPACES | default; comma-separated allowlist, CLI/API/scheduler 공통 |
+| AIOPS_CLUSTER / AIOPS_CONTEXT | configured-context / current kubeconfig context; 보고서 identity / API·scheduler 인증 context |
+| AIOPS_RESTART_THRESHOLD / AIOPS_CPU_THRESHOLD | 5 / 0.8 cores; API·scheduler 임계값 / structured CPU 임계값 |
+| PROMETHEUS_URL / LOKI_URL | unset; 관리자가 신뢰하는 backend base URL만 설정 |
+| LOKI_MINUTES / LOKI_LINE_LIMIT | 15 / 100; 1–1440 minutes / 1–1000 lines |
+| AIOPS_LLM_ENABLED | false; optional advisory |
+| OPENAI_MODEL / OPENAI_API_KEY | unset; 두 값 모두 필요, key는 Secret 환경으로 전달 |
+| AIOPS_NOTIFY_ENABLED / DISCORD_WEBHOOK_URL | false / unset; webhook 설정과 enable 필요 |
+| AIOPS_API_TOKEN / ALERTMANAGER_TOKEN | unset; API bearer / 별도 webhook authentication |
+
+## Docker execution
+
+```bash
+docker build -t aiops-engine:1.0.0 .
+docker run --rm --init --name aiops-local --read-only --cap-drop ALL \
+  --security-opt no-new-privileges -p 127.0.0.1:8000:8000 \
+  -e AIOPS_ALLOWED_NAMESPACES=default aiops-engine:1.0.0
+curl http://127.0.0.1:8000/health
+docker stop aiops-local
+```
+
+최종 HOST 검증: `bash scripts/final_host_validation.sh` ([판정 기준과 원인 분석](docs/host-validation.md)).
+검증용 `aiops-final-health`만 교체하며 다른 컨테이너는 변경하지 않습니다.
+
+이 async health는 Kubernetes 인증과 AnyIO worker thread를 요구하지 않습니다. 실제 분석에는 기존 인증이 필요합니다.
+로컬에서 기존 kubeconfig를 read-only mount할 때 연결된 인증 파일/plugin도 관리해야 합니다.
+slim image에는 AWS CLI가 없으므로 EKS exec kubeconfig는 별도 이미지/인증 준비가 필요합니다.
+Secret·kubeconfig를 image에 COPY하지 않습니다. exec-form CMD가 Uvicorn에 종료 신호를 전달합니다.
+
+## Helm deployment and Kubernetes READ-ONLY permissions
+
+```bash
+helm lint charts/aiops-engine
+helm template aiops charts/aiops-engine --namespace aiops-test
+# 검토한 이미지와 기존 isolated namespace가 준비된 환경에서만 실행
+helm install aiops charts/aiops-engine --namespace aiops-test \
+  --set image.repository=your-registry/aiops-engine --set image.tag=1.0.0
+kubectl get pods -n aiops-test
+```
+
+이번 환경에서는 namespace 격리/접근을 확인할 수 없어 설치하지 않았습니다.
+namespace별 Role은 core `pods`, `events`의 `get`, `list`만 허용합니다.
+Secret, exec/logs, nodes, cluster role, 변경 verb를 부여하지 않습니다.
+`allowedNamespaces`는 조회 대상과 RBAC scope를 함께 설정하며 namespace를 생성하지 않습니다.
+`existingSecret`은 별도 관리하는 기존 Secret 이름입니다. chart values에는 Secret 값을 넣지 않습니다.
+
+## Limitations
+
+단일 worker/replica, 최대 1000건 memory store이며 재시작 시 incident/dedup 기록이 사라집니다.
+Service/Ingress topology는 수집하지 않으며 routing은 로그 기반 후보입니다. metric/log Pod UID와
+메모리 peak/time-series를 검증하지 않습니다. namespace 로그 제한 때문에 모든 workload coverage를
+보장하지 않습니다. empty evidence/no findings는 정상 보장이 아닙니다.
+Backend URL은 신뢰하는 운영 설정이며 API에서 URL을 받지 않습니다. private endpoint도 필요하므로
+일반 사설 IP를 차단하지 않습니다. redirects와 URL credentials는 거부합니다. backend auth/tenant adapter,
+PII 완전 탐지, dependency vulnerability/SBOM scan과 실제 배포/외부 연동 검증은 남아 있습니다.
 
 ## Documentation
 

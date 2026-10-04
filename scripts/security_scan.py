@@ -11,7 +11,7 @@ PATTERNS = [r'\b(?:AKIA|ASIA)[A-Z0-9]{16}\b', r'\bsk-[A-Za-z0-9_-]{20,}\b',
             r'(?i)(?:api_key|password|webhook_url|access_token)\s*[:=]\s*["\x27][A-Za-z0-9+/=_-]{24,}["\x27]']
 paths = [ROOT / name for name in ('README.md','Dockerfile','.gitignore','.dockerignore','config.example.yaml','.env.example','requirements.txt','requirements-dev.txt')]
 for name in ('app','tests','examples','docs','charts','scripts'):
-    paths.extend(p for p in (ROOT/name).rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix in ('.py','.md','.yaml','.json','.tpl'))
+    paths.extend(p for p in (ROOT/name).rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix in ('.py','.md','.yaml','.json','.tpl','.sh','.c'))
 findings=[]
 for path in paths:
     if not path.exists(): continue
